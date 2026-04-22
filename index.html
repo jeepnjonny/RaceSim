@@ -289,6 +289,13 @@
         </div>
       </div>
       <div class="form-group">
+        <label>RF COVERAGE</label>
+        <div class="slider-with-val">
+          <input type="range" min="40" max="100" value="100" id="rf-coverage" step="1" oninput="document.getElementById('rf-coverage-val').textContent=this.value+'%'">
+          <span class="slider-val" id="rf-coverage-val">100%</span>
+        </div>
+      </div>
+      <div class="form-group">
         <button onclick="generateParticipants()" style="width:100%">GENERATE PARTICIPANTS</button>
       </div>
     </div>
@@ -319,12 +326,14 @@
     <div id="map-overlay" style="display:none">
       <h3>Legend</h3>
       <div class="legend-row" id="map-legend-row"><div class="legend-dot" id="map-legend-dot" style="background:var(--runner)"></div><span id="map-legend-label">Runner</span></div>
+      <div class="legend-row" id="map-deadzone-legend" style="display:none"><div style="width:18px;height:4px;background:#f85149;border-radius:2px;flex-shrink:0"></div><span style="color:#f85149">RF Dead Zone</span></div>
       <div style="border-top:1px solid var(--border); margin: 8px 0;"></div>
       <div class="stat-line"><span>Active</span><span class="stat-val" id="stat-active">0</span></div>
       <div class="stat-line"><span>Finished</span><span class="stat-val" id="stat-finished">0</span></div>
       <div class="stat-line"><span>DNF</span><span class="stat-val" id="stat-dnf">0</span></div>
       <div class="stat-line"><span>MQTT sent</span><span class="stat-val" id="stat-mqtt">0</span></div>
       <div class="stat-line"><span>Dropped</span><span class="stat-val" id="stat-dropped" style="color:var(--accent3)">0</span></div>
+      <div class="stat-line"><span>Dead zones</span><span class="stat-val" id="stat-deadzones" style="color:#f85149">0</span></div>
       <div style="border-top:1px solid var(--border); margin: 8px 0;"></div>
       <div style="font-size:10px;color:var(--text3)">Track dist</div>
       <div class="stat-val" id="stat-dist">0 km</div>
@@ -418,6 +427,8 @@ let leafletMap = null;
 let markerLayer = null;
 let trackLayer = null;
 let selectedRaceType = 'runner';
+let deadzones = [];
+let deadzoneLayerGroup = [];
 
 const TYPE_LABELS = { runner:'Runner', hiker:'Hiker', bicyclist:'Bicyclist', dirtbike:'Dirt Bike' };
 const TYPE_BADGE_LABELS = { runner:'&#9679; RUN', hiker:'&#9679; HIKE', bicyclist:'&#9679; BIKE', dirtbike:'&#9679; MOTO' };
@@ -517,6 +528,71 @@ function posOnTrack(dist) {
     trackPoints[lo][0] + t*(trackPoints[hi][0]-trackPoints[lo][0]),
     trackPoints[lo][1] + t*(trackPoints[hi][1]-trackPoints[lo][1])
   ];
+}
+
+// ===================== DEADZONES =====================
+function generateDeadzones() {
+  clearDeadzoneLayer();
+  deadzones = [];
+  const rfCoverage = parseInt(document.getElementById('rf-coverage').value);
+  if (rfCoverage >= 100) {
+    document.getElementById('map-deadzone-legend').style.display = 'none';
+    document.getElementById('stat-deadzones').textContent = '0';
+    return;
+  }
+
+  const deadFraction = (100 - rfCoverage) / 100;
+  const totalDeadLength = totalDist * deadFraction;
+  const count = Math.floor(2 + Math.random() * 4);
+
+  // Random lengths summing to totalDeadLength
+  const raw = Array.from({length: count}, () => Math.random());
+  const sum = raw.reduce((a, b) => a + b, 0);
+  const lengths = raw.map(v => (v / sum) * totalDeadLength);
+
+  // Place segments at random positions, each must fit on track
+  lengths.forEach(len => {
+    const maxStart = totalDist - len;
+    if (maxStart <= 0) return;
+    deadzones.push({ start: Math.random() * maxStart, end: 0 });
+    deadzones[deadzones.length - 1].end = deadzones[deadzones.length - 1].start + len;
+  });
+
+  // Draw red segments on map
+  if (leafletMap) {
+    deadzones.forEach(dz => {
+      const pts = getTrackSegment(dz.start, dz.end);
+      if (pts.length >= 2) {
+        const layer = L.polyline(pts, {color:'#f85149', weight:5, opacity:0.85}).addTo(leafletMap);
+        deadzoneLayerGroup.push(layer);
+      }
+    });
+    document.getElementById('map-deadzone-legend').style.display = '';
+  }
+
+  document.getElementById('stat-deadzones').textContent = deadzones.length;
+  const deadKm = (totalDeadLength / 1000).toFixed(2);
+  addLog('warn', `RF deadzones: ${deadzones.length} zones, ${deadKm} km no-signal`);
+}
+
+function clearDeadzoneLayer() {
+  deadzoneLayerGroup.forEach(l => { try { leafletMap.removeLayer(l); } catch(e){} });
+  deadzoneLayerGroup = [];
+}
+
+function getTrackSegment(startDist, endDist) {
+  const pts = [posOnTrack(startDist)];
+  for (let i = 0; i < trackDistances.length; i++) {
+    if (trackDistances[i] > startDist && trackDistances[i] < endDist) {
+      pts.push(trackPoints[i]);
+    }
+  }
+  pts.push(posOnTrack(endDist));
+  return pts;
+}
+
+function isInDeadzone(dist) {
+  return deadzones.some(dz => dist >= dz.start && dist <= dz.end);
 }
 
 // ===================== MAP =====================
@@ -658,6 +734,7 @@ function startRace() {
   const simDt = SIM_TICK / 1000 * simSpeed; // simulated seconds per tick
 
   addLog('info', 'Race started! ' + participants.length + ' participants.');
+  generateDeadzones();
 
   simInterval = setInterval(() => {
     raceElapsed += simDt;
@@ -694,13 +771,15 @@ function startRace() {
         updateResults();
       }
 
-      // MQTT TX
+      // MQTT TX — suppressed inside RF deadzones
       p.lastTx += simDt;
       if (p.lastTx >= txInterval) {
         p.lastTx = 0;
-        p.txCount++;
-        const pos = posOnTrack(p.dist);
-        sendMqttPacket(p, pos);
+        if (!isInDeadzone(p.dist)) {
+          p.txCount++;
+          const pos = posOnTrack(p.dist);
+          sendMqttPacket(p, pos);
+        }
       }
 
       // Update marker
@@ -734,6 +813,10 @@ function resetRace() {
   mqttMsgCount = 0;
   droppedCount = 0;
   mqttViewerCount = 0;
+  deadzones = [];
+  clearDeadzoneLayer();
+  document.getElementById('map-deadzone-legend').style.display = 'none';
+  document.getElementById('stat-deadzones').textContent = '0';
   document.getElementById('race-clock').textContent = '00:00:00';
   document.getElementById('sim-status').textContent = 'IDLE';
   document.getElementById('sim-status').className = 'status-pill pill-idle';
