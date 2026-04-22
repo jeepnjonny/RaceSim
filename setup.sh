@@ -42,7 +42,14 @@ chown -R root:www-data "$INSTALL_DIR"
 find "$INSTALL_DIR" -type d -exec chmod 750 {} +
 find "$INSTALL_DIR" -type f -exec chmod 640 {} +
 
-# ── 4. nginx site config ──────────────────────────────────────────────────────
+# ── 4. Remove legacy conf.d file if present ──────────────────────────────────
+LEGACY_CONF="/etc/nginx/conf.d/meshrace.conf"
+if [ -f "$LEGACY_CONF" ]; then
+  echo "==> Removing legacy config: $LEGACY_CONF"
+  rm -f "$LEGACY_CONF"
+fi
+
+# ── 5. nginx site config ──────────────────────────────────────────────────────
 echo "==> Writing $SITES_AVAILABLE..."
 cat > "$SITES_AVAILABLE" << EOF
 # MeshRace Simulator
@@ -73,7 +80,7 @@ else
   echo "==> Site already enabled."
 fi
 
-# ── 5. Test and reload ────────────────────────────────────────────────────────
+# ── 6. Test and reload ────────────────────────────────────────────────────────
 echo "==> Testing nginx config..."
 nginx -t
 
