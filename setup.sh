@@ -3,14 +3,14 @@
 # Run once as root (or with sudo) on your nginx host.
 #
 # Usage:
-#   sudo bash server-setup.sh
+#   sudo bash setup.sh
 #
 # Optional: set SERVER_NAME to your domain before running, e.g.:
-#   SERVER_NAME=example.com sudo bash server-setup.sh
+#   SERVER_NAME=example.com sudo bash setup.sh
 set -euo pipefail
 
 REPO_URL="https://github.com/jeepnjonny/meshtastic-race-simulator.git"
-INSTALL_DIR="/opt/meshtastic-race-simulator"
+INSTALL_DIR="/srv/meshtastic-race-simulator"
 SITE_NAME="meshrace"
 SITES_AVAILABLE="/etc/nginx/sites-available/$SITE_NAME"
 SITES_ENABLED="/etc/nginx/sites-enabled/$SITE_NAME"
@@ -35,10 +35,12 @@ else
 fi
 
 # ── 3. Permissions ────────────────────────────────────────────────────────────
+# root owns the repo so git operations work under sudo.
+# www-data group gets read access to serve files; no write access needed.
 echo "==> Setting permissions..."
-chown -R www-data:www-data "$INSTALL_DIR"
-find "$INSTALL_DIR" -type d -exec chmod 755 {} +
-find "$INSTALL_DIR" -type f -exec chmod 644 {} +
+chown -R root:www-data "$INSTALL_DIR"
+find "$INSTALL_DIR" -type d -exec chmod 750 {} +
+find "$INSTALL_DIR" -type f -exec chmod 640 {} +
 
 # ── 4. nginx site config ──────────────────────────────────────────────────────
 echo "==> Writing $SITES_AVAILABLE..."
@@ -82,4 +84,4 @@ echo ""
 echo "Done! App is live at: http://${SERVER_NAME}/MeshraceSim/"
 echo ""
 echo "To apply future updates:"
-echo "  cd $INSTALL_DIR && git pull && sudo bash update.sh"
+echo "  cd $INSTALL_DIR && sudo git pull && sudo bash update.sh"
