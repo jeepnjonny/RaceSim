@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meshtastic Race Simulator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --border: #30363d;
+    --accent: #58a6ff;
+    --accent2: #3fb950;
+    --accent3: #f78166;
+    --accent4: #d2a679;
+    --text: #e6edf3;
+    --text2: #8b949e;
+    --text3: #484f58;
+    --runner: #58a6ff;
+    --hiker: #3fb950;
+    --bicyclist: #f0c040;
+    --dirtbike: #f78166;
+    --font: 'Courier New', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* TOP BAR */
+  #topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 8px 16px; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+  #topbar h1 { font-size: 14px; font-weight: bold; letter-spacing: 2px; color: var(--accent); text-transform: uppercase; white-space: nowrap; }
+  .status-pill { padding: 3px 10px; border-radius: 20px; font-size: 11px; border: 1px solid; }
+  .pill-idle { border-color: var(--text3); color: var(--text2); }
+  .pill-running { border-color: var(--accent2); color: var(--accent2); animation: pulse 2s infinite; }
+  .pill-mqtt { border-color: var(--accent4); color: var(--accent4); }
+  .pill-mqttok { border-color: var(--accent2); color: var(--accent2); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+  #topbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  button { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 5px 14px; border-radius: 6px; cursor: pointer; font-family: var(--font); font-size: 12px; transition: all 0.15s; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: bold; }
+  button.primary:hover { background: #79b8ff; }
+  button.danger { border-color: var(--accent3); color: var(--accent3); }
+  button.danger:hover { background: var(--accent3); color: #000; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* MAIN LAYOUT */
+  #main { display: flex; flex: 1; overflow: hidden; }
+
+  /* LEFT PANEL */
+  #left-panel { width: 300px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
+  .panel-tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .tab-btn { flex: 1; padding: 8px 4px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text2); font-size: 11px; letter-spacing: 1px; border-radius: 0; cursor: pointer; transition: all 0.15s; }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-btn:hover { color: var(--text); background: var(--surface2); }
+  .tab-content { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding: 12px; gap: 10px; }
+  .tab-content.active { display: flex; }
+
+  /* FORM ELEMENTS */
+  label { font-size: 11px; color: var(--text2); letter-spacing: 0.5px; display: block; margin-bottom: 3px; }
+  input, select, textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 8px; border-radius: 4px; font-family: var(--font); font-size: 12px; outline: none; }
+  input:focus, select:focus { border-color: var(--accent); }
+  input[type=range] { padding: 2px 0; accent-color: var(--accent); }
+  .form-row { display: flex; gap: 8px; }
+  .form-row > * { flex: 1; }
+  .form-group { display: flex; flex-direction: column; gap: 3px; }
+  .section-header { font-size: 10px; letter-spacing: 2px; color: var(--text3); text-transform: uppercase; padding: 4px 0; border-top: 1px solid var(--border); margin-top: 4px; }
+
+  /* PARTICIPANT LIST */
+  #participant-list { flex: 1; overflow-y: auto; }
+  .participant-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-bottom: 1px solid var(--border); font-size: 11px; cursor: pointer; transition: background 0.1s; }
+  .participant-row:hover { background: var(--surface2); }
+  .p-num { color: var(--text3); width: 28px; text-align: right; }
+  .p-icon { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .p-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .p-pos { color: var(--text2); font-size: 10px; min-width: 32px; text-align: right; }
+  .p-pace { color: var(--text3); font-size: 10px; min-width: 48px; text-align: right; }
+  .p-finished { color: var(--accent2); font-size: 10px; }
+  .p-nodeid { color: var(--text3); font-size: 9px; font-family: var(--font); letter-spacing: 0; white-space: nowrap; }
+  .p-row-runner .p-icon { background: var(--runner); }
+  .p-row-hiker .p-icon { background: var(--hiker); }
+  .p-row-bicyclist .p-icon { background: var(--bicyclist); }
+  .p-row-dirtbike .p-icon { background: var(--dirtbike); }
+
+  /* MAP */
+  #map-container { flex: 1; position: relative; }
+  #map { width: 100%; height: 100%; }
+  #map-overlay { position: absolute; top: 10px; right: 10px; background: rgba(13,17,23,0.9); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; font-size: 11px; z-index: 1000; min-width: 160px; }
+  #map-overlay h3 { font-size: 10px; letter-spacing: 2px; color: var(--text3); text-transform: uppercase; margin-bottom: 8px; }
+  .legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .stat-line { display: flex; justify-content: space-between; gap: 16px; margin-top: 2px; }
+  .stat-val { color: var(--accent); font-weight: bold; }
+
+  /* RIGHT LOG PANEL */
+  #right-panel { width: 300px; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  #log-header { padding: 4px 8px 0; border-bottom: 1px solid var(--border); font-size: 10px; letter-spacing: 2px; color: var(--text3); text-transform: uppercase; display: flex; align-items: center; gap: 0; }
+  #log-body { flex: 1; overflow-y: auto; padding: 6px; font-size: 11px; }
+  .log-entry { padding: 3px 6px; border-bottom: 1px solid var(--border); display: flex; gap: 6px; align-items: flex-start; }
+  .log-time { color: var(--text3); white-space: nowrap; }
+  .log-msg { color: var(--text2); line-height: 1.4; }
+  .log-mqtt { color: var(--accent4); }
+  .log-finish { color: var(--accent2); }
+  .log-warn { color: var(--accent3); }
+  .log-info { color: var(--accent); }
+
+  /* MQTT VIEWER */
+  #mqtt-log-body { flex: 1; overflow-y: auto; display: none; }
+  .mqtt-entry { border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
+  .mqtt-entry:hover { background: var(--surface2); }
+  .mqtt-entry-header { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 10px; }
+  .mqtt-entry-seq { color: var(--text3); min-width: 28px; }
+  .mqtt-entry-node { color: var(--accent4); font-weight: bold; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mqtt-entry-time { color: var(--text3); white-space: nowrap; }
+  .mqtt-entry-dropped { color: var(--accent3); font-size: 9px; }
+  .mqtt-entry-body { display: none; background: var(--bg); padding: 6px 8px; font-size: 10px; color: var(--text2); white-space: pre; overflow-x: auto; border-top: 1px solid var(--border); line-height: 1.5; }
+  .mqtt-entry.expanded .mqtt-entry-body { display: block; }
+  .mqtt-topic-line { font-size: 9px; color: var(--text3); padding: 0 8px 4px; word-break: break-all; line-height: 1.4; }
+
+  /* PROGRESS BAR */
+  .progress-bar-wrap { background: var(--border); border-radius: 2px; height: 4px; margin-top: 2px; }
+  .progress-bar-fill { height: 4px; border-radius: 2px; transition: width 0.5s; }
+
+  /* UPLOAD AREA */
+  .upload-zone { border: 1px dashed var(--border); border-radius: 6px; padding: 16px; text-align: center; color: var(--text2); cursor: pointer; transition: all 0.2s; }
+  .upload-zone:hover { border-color: var(--accent); color: var(--accent); }
+  .upload-zone.has-file { border-color: var(--accent2); color: var(--accent2); }
+
+  /* SCROLLBAR */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* MODAL */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; width: 400px; max-width: 95vw; }
+  .modal h2 { font-size: 13px; letter-spacing: 1px; color: var(--accent); margin-bottom: 16px; }
+  .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+  /* CLOCK */
+  #race-clock { font-size: 20px; font-weight: bold; color: var(--accent2); letter-spacing: 3px; }
+  #race-speed { font-size: 11px; color: var(--text2); }
+
+  .type-badge { font-size: 10px; padding: 1px 5px; border-radius: 3px; }
+  .badge-runner { background: rgba(88,166,255,0.15); color: var(--runner); }
+  .badge-hiker { background: rgba(63,185,80,0.15); color: var(--hiker); }
+  .badge-bicyclist { background: rgba(240,192,64,0.15); color: var(--bicyclist); }
+  .badge-dirtbike { background: rgba(247,129,102,0.15); color: var(--dirtbike); }
+
+  #no-track { display: flex; align-items: center; justify-content: center; height: 100%; background: var(--surface); color: var(--text3); flex-direction: column; gap: 12px; }
+
+  .slider-with-val { display: flex; gap: 8px; align-items: center; }
+  .slider-with-val input[type=range] { flex: 1; }
+  .slider-val { min-width: 32px; text-align: right; color: var(--accent); font-weight: bold; }
+
+  input[type=checkbox] { width: auto; accent-color: var(--accent); }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; }
+  .checkbox-row label { margin: 0; color: var(--text); }
+
+  .type-option { display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--border); border-radius:6px; cursor:pointer; transition:all 0.15s; background:var(--bg); }
+  .type-option:hover { border-color: var(--text2); }
+  .type-option.active { border-color: var(--accent); background: rgba(88,166,255,0.07); }
+  .type-option-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .type-option-label { font-size:11px; font-weight:bold; letter-spacing:1px; color:var(--text); }
+  .type-option-sub { font-size:10px; color:var(--text3); margin-top:1px; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <h1>&#9654; MeshRace Sim</h1>
+  <div class="status-pill pill-idle" id="sim-status">IDLE</div>
+  <div class="status-pill pill-idle" id="mqtt-status">MQTT OFFLINE</div>
+  <span id="topbar-type" style="font-size:11px;letter-spacing:1px;color:var(--runner)">RUNNER</span>
+  <div id="race-clock">00:00:00</div>
+  <span id="race-speed" style="display:none">&#xD7;<span id="speed-val">1</span>x</span>
+  <div id="topbar-right">
+    <button onclick="openMqttConfig()">MQTT Config</button>
+    <button class="primary" id="btn-start" onclick="startRace()">START RACE</button>
+    <button class="danger" id="btn-stop" onclick="stopRace()" disabled>STOP</button>
+    <button id="btn-reset" onclick="resetRace()">RESET</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- LEFT PANEL -->
+  <div id="left-panel">
+    <div class="panel-tabs">
+      <button class="tab-btn active" onclick="switchTab('setup')">SETUP</button>
+      <button class="tab-btn" onclick="switchTab('participants')">RUNNERS</button>
+      <button class="tab-btn" onclick="switchTab('results')">RESULTS</button>
+    </div>
+
+    <!-- SETUP TAB -->
+    <div class="tab-content active" id="tab-setup">
+      <div class="section-header">TRACK</div>
+      <div class="form-group">
+        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('kml-input').click()">
+          <div id="upload-text">&#8593; Upload KML Track</div>
+          <input type="file" id="kml-input" accept=".kml,.gpx" style="display:none" onchange="loadKML(this)">
+        </div>
+      </div>
+
+      <div class="section-header">PARTICIPANTS</div>
+      <div class="form-group">
+        <label>RACE TYPE</label>
+        <div id="race-type-selector" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:2px">
+          <div class="type-option active" data-type="runner" onclick="selectRaceType('runner')">
+            <div class="type-option-dot" style="background:var(--runner)"></div>
+            <div>
+              <div class="type-option-label">RUNNER</div>
+              <div class="type-option-sub">2.5–5.5 m/s</div>
+            </div>
+          </div>
+          <div class="type-option" data-type="hiker" onclick="selectRaceType('hiker')">
+            <div class="type-option-dot" style="background:var(--hiker)"></div>
+            <div>
+              <div class="type-option-label">HIKER</div>
+              <div class="type-option-sub">0.8–1.8 m/s</div>
+            </div>
+          </div>
+          <div class="type-option" data-type="bicyclist" onclick="selectRaceType('bicyclist')">
+            <div class="type-option-dot" style="background:var(--bicyclist)"></div>
+            <div>
+              <div class="type-option-label">BICYCLE</div>
+              <div class="type-option-sub">3–10 m/s</div>
+            </div>
+          </div>
+          <div class="type-option" data-type="dirtbike" onclick="selectRaceType('dirtbike')">
+            <div class="type-option-dot" style="background:var(--dirtbike)"></div>
+            <div>
+              <div class="type-option-label">DIRT BIKE</div>
+              <div class="type-option-sub">6–20 m/s</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>COUNT</label>
+        <div class="slider-with-val">
+          <input type="range" min="1" max="200" value="10" id="p-count" step="1" oninput="document.getElementById('p-count-val').textContent=this.value">
+          <span class="slider-val" id="p-count-val">10</span>
+        </div>
+      </div>
+
+      <div class="section-header">SIMULATION</div>
+      <div class="form-group">
+        <label>SIM SPEED MULTIPLIER</label>
+        <div class="slider-with-val">
+          <input type="range" min="1" max="200" value="10" id="sim-speed" step="1" oninput="simSpeed=+this.value;document.getElementById('speed-val').textContent=this.value;document.getElementById('sim-speed-val').textContent=this.value+'x'">
+          <span class="slider-val" id="sim-speed-val">10x</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>MESH TX INTERVAL</label>
+        <select id="tx-interval">
+          <option value="30">30 seconds</option>
+          <option value="60">1 minute</option>
+          <option value="120">2 minutes</option>
+          <option value="300">5 minutes</option>
+          <option value="600">10 minutes</option>
+          <option value="900">15 minutes</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>PACE VARIANCE</label>
+        <div class="slider-with-val">
+          <input type="range" min="0" max="100" value="20" id="pace-var" step="1" oninput="document.getElementById('pace-var-val').textContent=this.value+'%'">
+          <span class="slider-val" id="pace-var-val">20%</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>DNF PROBABILITY</label>
+        <div class="slider-with-val">
+          <input type="range" min="0" max="40" value="5" id="dnf-pct" step="1" oninput="document.getElementById('dnf-pct-val').textContent=this.value+'%'">
+          <span class="slider-val" id="dnf-pct-val">5%</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>MISSING BEACONS</label>
+        <div class="slider-with-val">
+          <input type="range" min="0" max="50" value="0" id="beacon-drop" step="1" oninput="document.getElementById('beacon-drop-val').textContent=this.value+'%'">
+          <span class="slider-val" id="beacon-drop-val">0%</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <button onclick="generateParticipants()" style="width:100%">GENERATE PARTICIPANTS</button>
+      </div>
+    </div>
+
+    <!-- PARTICIPANTS TAB -->
+    <div class="tab-content" id="tab-participants">
+      <div style="padding: 0 0 8px; display:flex; gap:6px; flex-wrap:wrap; flex-shrink:0;" id="participants-tab-legend">
+        <span class="type-badge badge-runner" id="legend-badge">&#9679; RUN</span>
+      </div>
+      <div id="participant-list" style="flex:1;overflow-y:auto;"></div>
+    </div>
+
+    <!-- RESULTS TAB -->
+    <div class="tab-content" id="tab-results">
+      <div id="results-list"></div>
+    </div>
+  </div>
+
+  <!-- MAP -->
+  <div id="map-container">
+    <div id="no-track">
+      <div style="font-size:32px">&#9760;</div>
+      <div>No track loaded</div>
+      <div style="font-size:11px; color:var(--text3)">Upload a KML or GPX file to begin</div>
+    </div>
+    <div id="map" style="display:none"></div>
+
+    <div id="map-overlay" style="display:none">
+      <h3>Legend</h3>
+      <div class="legend-row" id="map-legend-row"><div class="legend-dot" id="map-legend-dot" style="background:var(--runner)"></div><span id="map-legend-label">Runner</span></div>
+      <div style="border-top:1px solid var(--border); margin: 8px 0;"></div>
+      <div class="stat-line"><span>Active</span><span class="stat-val" id="stat-active">0</span></div>
+      <div class="stat-line"><span>Finished</span><span class="stat-val" id="stat-finished">0</span></div>
+      <div class="stat-line"><span>DNF</span><span class="stat-val" id="stat-dnf">0</span></div>
+      <div class="stat-line"><span>MQTT sent</span><span class="stat-val" id="stat-mqtt">0</span></div>
+      <div class="stat-line"><span>Dropped</span><span class="stat-val" id="stat-dropped" style="color:var(--accent3)">0</span></div>
+      <div style="border-top:1px solid var(--border); margin: 8px 0;"></div>
+      <div style="font-size:10px;color:var(--text3)">Track dist</div>
+      <div class="stat-val" id="stat-dist">0 km</div>
+    </div>
+  </div>
+
+  <!-- RIGHT LOG -->
+  <div id="right-panel">
+    <div id="log-header">
+      <div style="display:flex;gap:0">
+        <button class="log-tab-btn active" id="logtab-btn-events" onclick="switchLogTab('events')" style="border-radius:0;border:none;border-bottom:2px solid var(--accent);padding:6px 10px;font-size:10px;letter-spacing:1px;background:none;color:var(--accent)">EVENTS</button>
+        <button class="log-tab-btn" id="logtab-btn-mqtt" onclick="switchLogTab('mqtt')" style="border-radius:0;border:none;border-bottom:2px solid transparent;padding:6px 10px;font-size:10px;letter-spacing:1px;background:none;color:var(--text2)">MQTT</button>
+      </div>
+      <button style="padding:2px 8px;font-size:10px;margin-left:auto" onclick="clearActiveLog()">CLR</button>
+    </div>
+    <div id="log-body" style="flex:1;overflow-y:auto;padding:6px;font-size:11px;display:flex;flex-direction:column;gap:0"></div>
+    <div id="mqtt-log-body" style="flex:1;overflow-y:auto;display:none;font-size:10px;font-family:var(--font)"></div>
+  </div>
+</div>
+
+<!-- MQTT CONFIG MODAL -->
+<div class="modal-bg" id="mqtt-modal" style="display:none">
+  <div class="modal">
+    <h2>MQTT CONFIGURATION</h2>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>BROKER HOST</label>
+      <input type="text" id="mqtt-host" value="mqtt.meshtastic.org" placeholder="mqtt.meshtastic.org">
+    </div>
+    <div class="form-row" style="margin-bottom:10px">
+      <div class="form-group">
+        <label>PORT</label>
+        <input type="number" id="mqtt-port" value="1883" placeholder="1883">
+      </div>
+      <div class="form-group">
+        <label>USE TLS</label>
+        <select id="mqtt-tls">
+          <option value="0">No</option>
+          <option value="1">Yes (WSS)</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row" style="margin-bottom:10px">
+      <div class="form-group">
+        <label>USERNAME</label>
+        <input type="text" id="mqtt-user" placeholder="meshdev">
+      </div>
+      <div class="form-group">
+        <label>PASSWORD</label>
+        <input type="password" id="mqtt-pass" placeholder="">
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>TOPIC PREFIX</label>
+      <input type="text" id="mqtt-topic" value="msh/US/2/json" placeholder="msh/US/2/json">
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>CHANNEL NAME</label>
+      <input type="text" id="mqtt-channel" value="race" placeholder="race">
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <div class="checkbox-row">
+        <input type="checkbox" id="mqtt-simulate" checked>
+        <label for="mqtt-simulate">Simulate only (log without connecting)</label>
+      </div>
+    </div>
+    <div id="mqtt-conn-status" style="font-size:11px;color:var(--text2);min-height:20px;"></div>
+    <div class="modal-footer">
+      <button onclick="closeMqttConfig()">CANCEL</button>
+      <button class="primary" onclick="connectMQTT()">CONNECT</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===================== STATE =====================
+let trackPoints = [];
+let trackDistances = [];
+let totalDist = 0;
+let participants = [];
+let simRunning = false;
+let simInterval = null;
+let clockInterval = null;
+let raceElapsed = 0;
+let simSpeed = 10;
+let mqttClient = null;
+let mqttConnected = false;
+let mqttSimMode = true;
+let mqttMsgCount = 0;
+let droppedCount = 0;
+let leafletMap = null;
+let markerLayer = null;
+let trackLayer = null;
+let selectedRaceType = 'runner';
+
+const TYPE_LABELS = { runner:'Runner', hiker:'Hiker', bicyclist:'Bicyclist', dirtbike:'Dirt Bike' };
+const TYPE_BADGE_LABELS = { runner:'&#9679; RUN', hiker:'&#9679; HIKE', bicyclist:'&#9679; BIKE', dirtbike:'&#9679; MOTO' };
+const TYPE_BADGE_CLASS = { runner:'badge-runner', hiker:'badge-hiker', bicyclist:'badge-bicyclist', dirtbike:'badge-dirtbike' };
+
+const PACE = {
+  runner:   { base: 3.5, min: 2.5, max: 5.5 },   // m/s ~5-12 min/mile
+  hiker:    { base: 1.2, min: 0.8, max: 1.8 },
+  bicyclist:{ base: 6.0, min: 3.0, max: 10.0 },
+  dirtbike: { base: 12.0, min: 6.0, max: 20.0 },
+};
+const COLORS = { runner:'#58a6ff', hiker:'#3fb950', bicyclist:'#f0c040', dirtbike:'#f78166' };
+const TYPE_ICONS = { runner:'&#9675;', hiker:'&#9651;', bicyclist:'&#9670;', dirtbike:'&#9733;' };
+
+const names = [
+  'Alex','Jordan','Casey','Morgan','Taylor','Riley','Avery','Quinn','Sage','Blake',
+  'Drew','Reese','Skyler','Peyton','Cameron','Finley','Hayden','Logan','Emerson','Harley',
+  'Rowan','Devin','Jaden','River','Phoenix','Remy','Elliot','Sasha','Micah','Lennon',
+  'Sterling','Oakley','Shea','Briar','Wren','Rory','Sloane','Marlowe','Indigo','Caspian',
+  'Fox','Lark','Zephyr','Orion','Atlas','Scout','Flint','Arrow','Birch','Cedar',
+  'Frost','Summit','Ridge','Vale','Crest','Peak','Cliff','Brook','Glen','Meadow'
+];
+
+// ===================== TABS =====================
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>{
+    const tabs=['setup','participants','results'];
+    b.classList.toggle('active', tabs[i]===name);
+  });
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+}
+
+// ===================== KML / GPX LOADING =====================
+function loadKML(input) {
+  const f = input.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const txt = e.target.result;
+    const isGPX = f.name.toLowerCase().endsWith('.gpx');
+    const pts = isGPX ? parseGPX(txt) : parseKML(txt);
+    if (!pts || pts.length < 2) { alert('No valid track coordinates found in file.'); return; }
+    setTrack(pts);
+    document.getElementById('upload-text').textContent = '✓ ' + f.name;
+    document.getElementById('upload-zone').classList.add('has-file');
+    addLog('info', 'Track loaded: ' + pts.length + ' pts, ' + (totalDist/1000).toFixed(2) + ' km');
+  };
+  reader.readAsText(f);
+}
+
+function parseKML(txt) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(txt, 'text/xml');
+  const coords = doc.querySelector('coordinates');
+  if (!coords) return null;
+  return coords.textContent.trim().split(/\s+/).map(c => {
+    const p = c.split(','); return p.length >= 2 ? [parseFloat(p[1]), parseFloat(p[0])] : null;
+  }).filter(Boolean);
+}
+
+function parseGPX(txt) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(txt, 'text/xml');
+  const trkpts = doc.querySelectorAll('trkpt,rtept,wpt');
+  return Array.from(trkpts).map(pt => [parseFloat(pt.getAttribute('lat')), parseFloat(pt.getAttribute('lon'))]);
+}
+
+function setTrack(pts) {
+  trackPoints = pts;
+  trackDistances = [0];
+  for (let i = 1; i < pts.length; i++) {
+    trackDistances.push(trackDistances[i-1] + haversine(pts[i-1], pts[i]));
+  }
+  totalDist = trackDistances[trackDistances.length - 1];
+  document.getElementById('stat-dist').textContent = (totalDist/1000).toFixed(2) + ' km';
+  initMap();
+}
+
+function haversine([lat1,lon1],[lat2,lon2]) {
+  const R = 6371000, r = Math.PI/180;
+  const dLat = (lat2-lat1)*r, dLon = (lon2-lon1)*r;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function posOnTrack(dist) {
+  if (dist <= 0) return trackPoints[0];
+  if (dist >= totalDist) return trackPoints[trackPoints.length-1];
+  let lo=0, hi=trackDistances.length-1;
+  while (lo < hi-1) {
+    const mid = (lo+hi)>>1;
+    trackDistances[mid] <= dist ? lo=mid : hi=mid;
+  }
+  const t = (dist - trackDistances[lo]) / (trackDistances[hi] - trackDistances[lo]);
+  return [
+    trackPoints[lo][0] + t*(trackPoints[hi][0]-trackPoints[lo][0]),
+    trackPoints[lo][1] + t*(trackPoints[hi][1]-trackPoints[lo][1])
+  ];
+}
+
+// ===================== MAP =====================
+function initMap() {
+  document.getElementById('no-track').style.display = 'none';
+  document.getElementById('map').style.display = 'block';
+  document.getElementById('map-overlay').style.display = 'block';
+
+  if (!leafletMap) {
+    leafletMap = L.map('map', {zoomControl: true}).setView(trackPoints[0], 13);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; CartoDB',
+      subdomains: 'abcd', maxZoom: 19
+    }).addTo(leafletMap);
+    markerLayer = L.layerGroup().addTo(leafletMap);
+  } else {
+    if (trackLayer) leafletMap.removeLayer(trackLayer);
+    markerLayer.clearLayers();
+  }
+
+  trackLayer = L.polyline(trackPoints, {color:'#8b949e', weight:3, opacity:0.6}).addTo(leafletMap);
+  L.circleMarker(trackPoints[0], {radius:8,color:'#3fb950',fillColor:'#3fb950',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('START');
+  L.circleMarker(trackPoints[trackPoints.length-1], {radius:8,color:'#f78166',fillColor:'#f78166',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('FINISH');
+  leafletMap.fitBounds(trackLayer.getBounds(), {padding:[20,20]});
+}
+
+// ===================== RACE TYPE =====================
+function selectRaceType(type) {
+  selectedRaceType = type;
+  document.querySelectorAll('.type-option').forEach(el => {
+    el.classList.toggle('active', el.dataset.type === type);
+  });
+  // Update participants tab badge
+  const badge = document.getElementById('legend-badge');
+  if (badge) { badge.innerHTML = TYPE_BADGE_LABELS[type]; badge.className = 'type-badge ' + TYPE_BADGE_CLASS[type]; }
+  // Update map legend
+  const dot = document.getElementById('map-legend-dot');
+  const lbl = document.getElementById('map-legend-label');
+  if (dot) dot.style.background = 'var(--' + type + ')';
+  if (lbl) lbl.textContent = TYPE_LABELS[type];
+  // Update topbar type indicator
+  const ind = document.getElementById('topbar-type');
+  if (ind) { ind.textContent = TYPE_LABELS[type].toUpperCase(); ind.style.color = 'var(--' + type + ')'; }
+}
+
+// ===================== PARTICIPANTS =====================
+function generateParticipants() {
+  if (simRunning) return;
+  const count = parseInt(document.getElementById('p-count').value);
+  const type = selectedRaceType;
+  const paceVar = parseInt(document.getElementById('pace-var').value)/100;
+
+  participants = [];
+  markerLayer && markerLayer.clearLayers();
+
+  const usedNames = [];
+  for (let i = 0; i < count; i++) {
+    const p = PACE[type];
+    const variance = 1 + (Math.random()*2-1)*paceVar;
+    const baseSpeed = p.base * variance;
+    const nodeId = '!' + Math.floor(Math.random()*0xFFFFFFFF).toString(16).padStart(8,'0');
+    let name;
+    do { name = names[Math.floor(Math.random()*names.length)]; } while(usedNames.includes(name) && usedNames.length < names.length);
+    usedNames.push(name);
+
+    participants.push({
+      id: i+1, name, type, nodeId,
+      baseSpeed,
+      currentSpeed: baseSpeed,
+      dist: 0,
+      finished: false,
+      dnf: false,
+      finishTime: null,
+      lastTx: 0,
+      txCount: 0,
+      speedTimer: 0,
+      speedInterval: 30 + Math.random()*60,
+      marker: null,
+      snr: (Math.random()*10-2).toFixed(1),
+      battery: Math.floor(70+Math.random()*30),
+    });
+  }
+
+  renderParticipantList();
+  addLog('info', count + ' ' + TYPE_LABELS[type].toLowerCase() + 's generated');
+}
+
+function renderParticipantList() {
+  const list = document.getElementById('participant-list');
+  list.innerHTML = '';
+  participants.forEach(p => {
+    const div = document.createElement('div');
+    div.className = `participant-row p-row-${p.type}`;
+    div.style.flexDirection = 'column';
+    div.style.alignItems = 'stretch';
+    div.style.gap = '2px';
+    const pct = totalDist > 0 ? (p.dist/totalDist*100).toFixed(0) : 0;
+    const statusHtml = p.finished
+      ? '<span class="p-finished">FIN</span>'
+      : p.dnf
+        ? '<span style="color:var(--accent3);font-size:10px">DNF</span>'
+        : `<span class="p-pos">${pct}%</span>`;
+    div.innerHTML = `
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="p-num">${p.id}</span>
+        <span class="p-icon"></span>
+        <span class="p-name">${p.name}</span>
+        ${statusHtml}
+        <span class="p-pace">${(p.currentSpeed*3.6).toFixed(1)}k</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;padding-left:40px">
+        <span class="p-nodeid">${p.nodeId}</span>
+        <span style="font-size:9px;color:var(--text3);margin-left:auto">${p.txCount > 0 ? 'TX:'+p.txCount : ''}</span>
+      </div>
+    `;
+    list.appendChild(div);
+  });
+}
+
+// ===================== RACE LOGIC =====================
+function startRace() {
+  if (!trackPoints.length) { alert('Load a KML/GPX track first.'); return; }
+  if (!participants.length) { alert('Generate participants first.'); return; }
+  if (simRunning) return;
+
+  simRunning = true;
+  document.getElementById('btn-start').disabled = true;
+  document.getElementById('btn-stop').disabled = false;
+  document.getElementById('sim-status').textContent = 'RUNNING';
+  document.getElementById('sim-status').className = 'status-pill pill-running';
+  document.getElementById('race-speed').style.display = '';
+
+  raceElapsed = 0;
+  clockInterval = setInterval(updateClock, 1000);
+
+  const txInterval = parseInt(document.getElementById('tx-interval').value);
+  const dnfPct = parseInt(document.getElementById('dnf-pct').value) / 100;
+  const SIM_TICK = 100; // ms real time
+  const simDt = SIM_TICK / 1000 * simSpeed; // simulated seconds per tick
+
+  addLog('info', 'Race started! ' + participants.length + ' participants.');
+
+  simInterval = setInterval(() => {
+    raceElapsed += simDt;
+    const allDone = participants.every(p=>p.finished||p.dnf);
+    if (allDone) { stopRace(); return; }
+
+    participants.forEach(p => {
+      if (p.finished || p.dnf) return;
+
+      // Speed variation
+      p.speedTimer += simDt;
+      if (p.speedTimer >= p.speedInterval) {
+        p.speedTimer = 0;
+        p.speedInterval = 30 + Math.random()*60;
+        const pv = parseInt(document.getElementById('pace-var').value)/100;
+        const variance = 1 + (Math.random()*2-1)*pv;
+        p.currentSpeed = Math.max(PACE[p.type].min, Math.min(PACE[p.type].max, p.baseSpeed * variance));
+      }
+
+      // Move
+      p.dist = Math.min(p.dist + p.currentSpeed * simDt, totalDist);
+
+      // DNF random event — scaled so dnfPct% of field DNFs over a typical race duration (~3600 sim-sec)
+      if (dnfPct > 0 && Math.random() < (dnfPct / participants.length) * (simDt / 3600)) {
+        p.dnf = true;
+        addLog('warn', `#${p.id} ${p.name} DNF at ${(p.dist/1000).toFixed(1)}km`);
+      }
+
+      // Finish check
+      if (p.dist >= totalDist && !p.finished) {
+        p.finished = true;
+        p.finishTime = raceElapsed;
+        addLog('finish', `#${p.id} ${p.name} FINISHED! ${formatTime(raceElapsed)}`);
+        updateResults();
+      }
+
+      // MQTT TX
+      p.lastTx += simDt;
+      if (p.lastTx >= txInterval) {
+        p.lastTx = 0;
+        p.txCount++;
+        const pos = posOnTrack(p.dist);
+        sendMqttPacket(p, pos);
+      }
+
+      // Update marker
+      updateMarker(p);
+    });
+
+    updateStats();
+    if (raceElapsed % 5 < simDt) renderParticipantList();
+  }, SIM_TICK);
+}
+
+function stopRace() {
+  simRunning = false;
+  clearInterval(simInterval);
+  clearInterval(clockInterval);
+  document.getElementById('btn-start').disabled = false;
+  document.getElementById('btn-stop').disabled = true;
+  document.getElementById('sim-status').textContent = 'STOPPED';
+  document.getElementById('sim-status').className = 'status-pill pill-idle';
+  addLog('warn', 'Simulation stopped');
+}
+
+function resetRace() {
+  stopRace();
+  participants.forEach(p => {
+    p.dist = 0; p.finished = false; p.dnf = false;
+    p.finishTime = null; p.lastTx = 0; p.txCount = 0;
+    p.currentSpeed = p.baseSpeed;
+  });
+  raceElapsed = 0;
+  mqttMsgCount = 0;
+  droppedCount = 0;
+  mqttViewerCount = 0;
+  document.getElementById('race-clock').textContent = '00:00:00';
+  document.getElementById('sim-status').textContent = 'IDLE';
+  document.getElementById('sim-status').className = 'status-pill pill-idle';
+  markerLayer && markerLayer.clearLayers();
+  participants.forEach(p=>p.marker=null);
+  renderParticipantList();
+  updateStats();
+  document.getElementById('results-list').innerHTML = '';
+  addLog('info','Race reset');
+}
+
+// ===================== MARKERS =====================
+function updateMarker(p) {
+  if (!leafletMap) return;
+  const pos = posOnTrack(p.dist);
+  const color = p.dnf ? '#484f58' : COLORS[p.type];
+
+  if (!p.marker) {
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="width:12px;height:12px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.6);"></div>`,
+      iconSize: [12,12], iconAnchor: [6,6]
+    });
+    p.marker = L.marker(pos, {icon, zIndexOffset: p.id}).addTo(markerLayer);
+    p.marker.bindTooltip(`#${p.id} ${p.name}`, {permanent:false,direction:'top'});
+  } else {
+    p.marker.setLatLng(pos);
+    if (p.finished || p.dnf) {
+      const icon = L.divIcon({
+        className: '',
+        html: `<div style="width:10px;height:10px;border-radius:50%;background:${color};opacity:0.4;border:1px solid #fff4;"></div>`,
+        iconSize:[10,10],iconAnchor:[5,5]
+      });
+      p.marker.setIcon(icon);
+    }
+  }
+}
+
+// ===================== LOG TABS =====================
+let activeLogTab = 'events';
+function switchLogTab(tab) {
+  activeLogTab = tab;
+  document.getElementById('log-body').style.display = tab === 'events' ? 'block' : 'none';
+  document.getElementById('mqtt-log-body').style.display = tab === 'mqtt' ? 'block' : 'none';
+  ['events','mqtt'].forEach(t => {
+    const btn = document.getElementById('logtab-btn-'+t);
+    btn.style.color = t === tab ? 'var(--accent)' : 'var(--text2)';
+    btn.style.borderBottom = t === tab ? '2px solid var(--accent)' : '2px solid transparent';
+  });
+}
+function clearActiveLog() {
+  if (activeLogTab === 'events') clearLog();
+  else { document.getElementById('mqtt-log-body').innerHTML = ''; mqttViewerCount = 0; }
+}
+
+// ===================== MQTT =====================
+let mqttViewerCount = 0;
+
+function sendMqttPacket(p, pos) {
+  const beaconDrop = parseInt(document.getElementById('beacon-drop').value) / 100;
+  const dropped = Math.random() < beaconDrop;
+  if (dropped) droppedCount++;
+
+  mqttMsgCount++;
+  const payload = {
+    from: parseInt(p.nodeId.substring(1), 16),
+    id: Math.floor(Math.random()*0xFFFFFFFF),
+    type: 'position',
+    sender: p.nodeId,
+    timestamp: Math.floor(Date.now()/1000),
+    payload: {
+      latitude_i: Math.round(pos[0]*1e7),
+      longitude_i: Math.round(pos[1]*1e7),
+      altitude: 0,
+      time: Math.floor(Date.now()/1000),
+      speed: Math.round(p.currentSpeed*3.6),
+      heading: 0,
+    },
+    channel: document.getElementById('mqtt-channel').value||'race',
+    snr: parseFloat(p.snr),
+    rssi: -Math.floor(80+Math.random()*40),
+    hop_limit: 3,
+  };
+
+  const topic = `${document.getElementById('mqtt-topic').value||'msh/US/2/json'}/${p.nodeId}/LongFast`;
+
+  if (!dropped && mqttConnected && mqttClient && !mqttSimMode) {
+    try { mqttClient.publish(topic, JSON.stringify(payload)); } catch(e){}
+  }
+
+  // Add to MQTT viewer
+  addMqttEntry(p, topic, payload, dropped);
+
+  // Add to events log for first TX or every 10th
+  if (p.txCount === 1 || mqttMsgCount % 10 === 0) {
+    if (dropped) {
+      addLog('warn', `DROP ${p.nodeId.substring(0,10)} #${p.id} ${p.name}`);
+    } else {
+      addLog('mqtt', `TX ${p.nodeId.substring(0,10)} ${(p.dist/1000).toFixed(2)}km`);
+    }
+  }
+}
+
+function addMqttEntry(p, topic, payload, dropped) {
+  const body = document.getElementById('mqtt-log-body');
+  mqttViewerCount++;
+  const now = new Date();
+  const time = [now.getHours(),now.getMinutes(),now.getSeconds()].map(v=>String(v).padStart(2,'0')).join(':');
+
+  const entry = document.createElement('div');
+  entry.className = 'mqtt-entry';
+  if (dropped) entry.style.opacity = '0.45';
+
+  const jsonStr = JSON.stringify(payload, null, 2);
+
+  entry.innerHTML = `
+    <div class="mqtt-entry-header" onclick="this.parentElement.classList.toggle('expanded')">
+      <span class="mqtt-entry-seq">#${mqttViewerCount}</span>
+      <span class="mqtt-entry-node">${p.nodeId}</span>
+      <span class="mqtt-entry-time">${time}</span>
+      ${dropped ? '<span class="mqtt-entry-dropped">DROPPED</span>' : ''}
+    </div>
+    <div class="mqtt-topic-line">${topic}</div>
+    <div class="mqtt-entry-body">${escHtml(jsonStr)}</div>
+  `;
+
+  body.appendChild(entry);
+  // Auto-scroll only if near bottom
+  if (body.scrollHeight - body.scrollTop - body.clientHeight < 80) {
+    body.scrollTop = body.scrollHeight;
+  }
+  // Trim to 300 entries
+  while (body.children.length > 300) body.removeChild(body.firstChild);
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function openMqttConfig() { document.getElementById('mqtt-modal').style.display='flex'; }
+function closeMqttConfig() { document.getElementById('mqtt-modal').style.display='none'; }
+
+function connectMQTT() {
+  const simOnly = document.getElementById('mqtt-simulate').checked;
+  mqttSimMode = simOnly;
+  const status = document.getElementById('mqtt-conn-status');
+
+  if (simOnly) {
+    mqttConnected = true;
+    document.getElementById('mqtt-status').textContent = 'MQTT SIM';
+    document.getElementById('mqtt-status').className = 'status-pill pill-mqttok';
+    status.textContent = '✓ Simulation mode active — packets logged, not transmitted';
+    addLog('mqtt','MQTT sim mode active');
+    setTimeout(closeMqttConfig, 1000);
+    return;
+  }
+
+  const host = document.getElementById('mqtt-host').value;
+  const port = document.getElementById('mqtt-port').value;
+  const useTls = document.getElementById('mqtt-tls').value === '1';
+  const user = document.getElementById('mqtt-user').value;
+  const pass = document.getElementById('mqtt-pass').value;
+
+  // Try to use Paho MQTT over WebSocket
+  if (typeof Paho === 'undefined') {
+    status.textContent = 'Loading MQTT library...';
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js';
+    s.onload = () => doConnect(host, port, useTls, user, pass, status);
+    s.onerror = () => { status.textContent = 'Failed to load MQTT library. Use simulation mode.'; };
+    document.head.appendChild(s);
+  } else {
+    doConnect(host, port, useTls, user, pass, status);
+  }
+}
+
+function doConnect(host, port, useTls, user, pass, status) {
+  try {
+    const clientId = 'meshsim_' + Math.random().toString(36).substr(2,8);
+    mqttClient = new Paho.Client(host, parseInt(port), clientId);
+    mqttClient.onConnectionLost = () => {
+      mqttConnected = false;
+      document.getElementById('mqtt-status').textContent = 'MQTT LOST';
+      document.getElementById('mqtt-status').className = 'status-pill pill-idle';
+      addLog('warn','MQTT connection lost');
+    };
+    const opts = {
+      onSuccess: () => {
+        mqttConnected = true;
+        document.getElementById('mqtt-status').textContent = 'MQTT LIVE';
+        document.getElementById('mqtt-status').className = 'status-pill pill-mqttok';
+        status.textContent = '✓ Connected to ' + host;
+        addLog('mqtt','MQTT connected to '+host);
+        setTimeout(closeMqttConfig, 1200);
+      },
+      onFailure: (e) => {
+        status.textContent = '✗ Failed: ' + e.errorMessage + ' — try simulation mode';
+        addLog('warn','MQTT connection failed: '+e.errorMessage);
+      },
+      useSSL: useTls,
+      timeout: 10,
+    };
+    if (user) { opts.userName = user; opts.password = pass; }
+    mqttClient.connect(opts);
+    status.textContent = 'Connecting...';
+  } catch(e) {
+    status.textContent = '✗ Error: ' + e.message;
+  }
+}
+
+// ===================== STATS & CLOCK =====================
+function updateStats() {
+  const active = participants.filter(p=>!p.finished&&!p.dnf).length;
+  const finished = participants.filter(p=>p.finished).length;
+  const dnf = participants.filter(p=>p.dnf).length;
+  document.getElementById('stat-active').textContent = active;
+  document.getElementById('stat-finished').textContent = finished;
+  document.getElementById('stat-dnf').textContent = dnf;
+  document.getElementById('stat-mqtt').textContent = mqttMsgCount;
+  const droppedEl = document.getElementById('stat-dropped');
+  if (droppedEl) droppedEl.textContent = droppedCount;
+}
+
+function updateClock() {
+  raceElapsed += 1;
+  document.getElementById('race-clock').textContent = formatTime(raceElapsed);
+}
+
+function formatTime(s) {
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60);
+  return [h,m,sec].map(v=>String(v).padStart(2,'0')).join(':');
+}
+
+function updateResults() {
+  const finished = participants.filter(p=>p.finished).sort((a,b)=>a.finishTime-b.finishTime);
+  const list = document.getElementById('results-list');
+  list.innerHTML = '<div style="font-size:10px;letter-spacing:2px;color:var(--text3);padding:4px 0;margin-bottom:6px">FINISHERS</div>';
+  finished.forEach((p,i) => {
+    list.innerHTML += `<div style="display:flex;gap:8px;align-items:center;padding:4px;border-bottom:1px solid var(--border);font-size:11px">
+      <span style="color:var(--text3);width:20px">${i+1}</span>
+      <span class="p-icon" style="width:8px;height:8px;border-radius:50%;background:${COLORS[p.type]};flex-shrink:0"></span>
+      <span style="flex:1">${p.name}</span>
+      <span style="color:var(--accent2)">${formatTime(p.finishTime)}</span>
+    </div>`;
+  });
+}
+
+// ===================== LOG =====================
+function addLog(type, msg) {
+  const body = document.getElementById('log-body');
+  const now = new Date();
+  const time = [now.getHours(),now.getMinutes(),now.getSeconds()].map(v=>String(v).padStart(2,'0')).join(':');
+  const cls = {mqtt:'log-mqtt',finish:'log-finish',warn:'log-warn',info:'log-info'}[type]||'';
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `<span class="log-time">${time}</span><span class="log-msg ${cls}">${msg}</span>`;
+  body.appendChild(entry);
+  body.scrollTop = body.scrollHeight;
+  // Trim log to 200 entries
+  while (body.children.length > 200) body.removeChild(body.firstChild);
+}
+
+function clearLog() { document.getElementById('log-body').innerHTML = ''; }
+
+// ===================== INIT =====================
+addLog('info', 'MeshRace Simulator ready');
+addLog('info', 'Upload a KML/GPX track to begin');
+
+// Demo: generate with no track (shows in list)
+document.addEventListener('keydown', e => { if (e.key==='Escape') closeMqttConfig(); });
+</script>
+</body>
+</html>
