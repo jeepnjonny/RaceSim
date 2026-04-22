@@ -282,7 +282,7 @@
         </div>
       </div>
       <div class="form-group">
-        <label>MISSING BEACONS</label>
+        <label>FAILED BEACONS</label>
         <div class="slider-with-val">
           <input type="range" min="0" max="50" value="0" id="beacon-drop" step="1" oninput="document.getElementById('beacon-drop-val').textContent=this.value+'%'">
           <span class="slider-val" id="beacon-drop-val">0%</span>
@@ -547,15 +547,23 @@ function generateDeadzones() {
 
   // Random lengths summing to totalDeadLength
   const raw = Array.from({length: count}, () => Math.random());
-  const sum = raw.reduce((a, b) => a + b, 0);
-  const lengths = raw.map(v => (v / sum) * totalDeadLength);
+  const rawSum = raw.reduce((a, b) => a + b, 0);
+  const lengths = raw.map(v => (v / rawSum) * totalDeadLength);
 
-  // Place segments at random positions, each must fit on track
-  lengths.forEach(len => {
-    const maxStart = totalDist - len;
-    if (maxStart <= 0) return;
-    deadzones.push({ start: Math.random() * maxStart, end: 0 });
-    deadzones[deadzones.length - 1].end = deadzones[deadzones.length - 1].start + len;
+  // Place zones with guaranteed gaps between them.
+  // Remaining space is divided into count+1 gaps (before, between, after).
+  // Each gap gets a minimum of 2% of track so zones are never consecutive.
+  const minGap = totalDist * 0.02;
+  const freeSpace = totalDist - totalDeadLength - minGap * (count + 1);
+  const gapRaw = Array.from({length: count + 1}, () => Math.random());
+  const gapSum = gapRaw.reduce((a, b) => a + b, 0);
+  const gaps = gapRaw.map(v => minGap + (freeSpace > 0 ? (v / gapSum) * freeSpace : 0));
+
+  let pos = 0;
+  lengths.forEach((len, i) => {
+    pos += gaps[i];
+    deadzones.push({ start: pos, end: pos + len });
+    pos += len;
   });
 
   // Draw red segments on map
