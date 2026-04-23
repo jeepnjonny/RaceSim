@@ -387,11 +387,27 @@
     </div>
     <div class="form-group" style="margin-bottom:10px">
       <label>TOPIC PREFIX</label>
-      <input type="text" id="mqtt-topic" value="msh/US/2/json" placeholder="msh/US/2/json">
+      <input type="text" id="mqtt-topic" value="msh/US/2/json" placeholder="msh/US/2/json" oninput="updateTopicPreview()">
     </div>
     <div class="form-group" style="margin-bottom:10px">
-      <label>CHANNEL NAME</label>
-      <input type="text" id="mqtt-channel" value="race" placeholder="race">
+      <label>MODEM PRESET</label>
+      <select id="mqtt-preset" onchange="onPresetChange()">
+        <option value="LongFast">Long Fast — SF11 BW250 (default, ~12 km)</option>
+        <option value="LongSlow">Long Slow — SF12 BW125 (~18 km)</option>
+        <option value="VeryLongSlow">Very Long Slow — SF12 BW62.5 (max range)</option>
+        <option value="MediumSlow">Medium Slow — SF10 BW125</option>
+        <option value="MediumFast">Medium Fast — SF9 BW250</option>
+        <option value="ShortSlow">Short Slow — SF8 BW125</option>
+        <option value="ShortFast">Short Fast — SF7 BW250</option>
+        <option value="ShortTurbo">Short Turbo — SF7 BW500 (min latency)</option>
+      </select>
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>CHANNEL NAME <span style="color:var(--text3);font-size:10px">used in topic path · defaults to preset name</span></label>
+      <input type="text" id="mqtt-channel" value="LongFast" placeholder="LongFast" oninput="updateTopicPreview()">
+    </div>
+    <div style="font-size:10px;color:var(--text3);margin-bottom:10px;line-height:1.5">
+      Topic: <span id="mqtt-topic-preview" style="color:var(--accent4)">msh/US/2/json/LongFast/!xxxxxxxx</span>
     </div>
     <div class="form-group" style="margin-bottom:10px">
       <div class="checkbox-row">
@@ -429,6 +445,17 @@ let trackLayer = null;
 let selectedRaceType = 'runner';
 let deadzones = [];
 let deadzoneLayerGroup = [];
+
+const MODEM_PRESETS = {
+  LongFast:    { snrMin: -12.5, snrMax: 12.5, rssiMin: -120, rssiMax: -85 },
+  LongSlow:    { snrMin: -15.0, snrMax: 12.5, rssiMin: -125, rssiMax: -85 },
+  VeryLongSlow:{ snrMin: -17.5, snrMax: 12.5, rssiMin: -130, rssiMax: -85 },
+  MediumSlow:  { snrMin: -10.0, snrMax: 12.5, rssiMin: -115, rssiMax: -85 },
+  MediumFast:  { snrMin:  -7.5, snrMax: 12.5, rssiMin: -110, rssiMax: -85 },
+  ShortSlow:   { snrMin:  -5.0, snrMax: 12.5, rssiMin: -105, rssiMax: -85 },
+  ShortFast:   { snrMin:  -2.5, snrMax: 12.5, rssiMin: -100, rssiMax: -85 },
+  ShortTurbo:  { snrMin:   0.0, snrMax: 12.5, rssiMin:  -95, rssiMax: -85 },
+};
 
 const TYPE_LABELS = { runner:'Runner', hiker:'Hiker', bicyclist:'Bicyclist', dirtbike:'Dirt Bike' };
 const TYPE_BADGE_LABELS = { runner:'&#9679; RUN', hiker:'&#9679; HIKE', bicyclist:'&#9679; BIKE', dirtbike:'&#9679; MOTO' };
@@ -889,27 +916,37 @@ function sendMqttPacket(p, pos) {
   if (dropped) droppedCount++;
 
   mqttMsgCount++;
+  const presetKey = document.getElementById('mqtt-preset').value || 'LongFast';
+  const channelName = document.getElementById('mqtt-channel').value || presetKey;
+  const modem = MODEM_PRESETS[presetKey] || MODEM_PRESETS.LongFast;
+  const snr = parseFloat((modem.snrMin + Math.random() * (modem.snrMax - modem.snrMin)).toFixed(2));
+  const rssi = Math.floor(modem.rssiMin + Math.random() * (modem.rssiMax - modem.rssiMin));
+
   const payload = {
+    channel: 0,
     from: parseInt(p.nodeId.substring(1), 16),
+    hop_limit: 3,
+    hop_start: 3,
     id: Math.floor(Math.random()*0xFFFFFFFF),
-    type: 'position',
-    sender: p.nodeId,
-    timestamp: Math.floor(Date.now()/1000),
     payload: {
+      altitude: 0,
+      ground_speed: Math.round(p.currentSpeed * 3.6),
+      ground_track: headingOnTrack(p.dist),
       latitude_i: Math.round(pos[0]*1e7),
       longitude_i: Math.round(pos[1]*1e7),
-      altitude: 0,
+      precision_bits: 32,
       time: Math.floor(Date.now()/1000),
-      speed: Math.round(p.currentSpeed*3.6),
-      heading: 0,
     },
-    channel: document.getElementById('mqtt-channel').value||'race',
-    snr: parseFloat(p.snr),
-    rssi: -Math.floor(80+Math.random()*40),
-    hop_limit: 3,
+    rssi,
+    sender: p.nodeId,
+    snr,
+    timestamp: Math.floor(Date.now()/1000),
+    to: 4294967295,
+    type: 'position',
+    want_ack: false,
   };
 
-  const topic = `${document.getElementById('mqtt-topic').value||'msh/US/2/json'}/${p.nodeId}/LongFast`;
+  const topic = `${document.getElementById('mqtt-topic').value||'msh/US/2/json'}/${channelName}/${p.nodeId}`;
 
   if (!dropped && mqttConnected && mqttClient && !mqttSimMode) {
     try { mqttClient.publish(topic, JSON.stringify(payload)); } catch(e){}
@@ -964,7 +1001,33 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function openMqttConfig() { document.getElementById('mqtt-modal').style.display='flex'; }
+function onPresetChange() {
+  const preset = document.getElementById('mqtt-preset').value;
+  document.getElementById('mqtt-channel').value = preset;
+  updateTopicPreview();
+}
+
+function updateTopicPreview() {
+  const prefix = document.getElementById('mqtt-topic').value || 'msh/US/2/json';
+  const channel = document.getElementById('mqtt-channel').value || 'LongFast';
+  document.getElementById('mqtt-topic-preview').textContent = `${prefix}/${channel}/!xxxxxxxx`;
+}
+
+function headingOnTrack(dist) {
+  const lookahead = Math.min(20, totalDist - dist);
+  if (lookahead <= 0) return 0;
+  const a = posOnTrack(dist), b = posOnTrack(dist + lookahead);
+  const dLon = (b[1] - a[1]) * Math.PI / 180;
+  const lat1 = a[0] * Math.PI / 180, lat2 = b[0] * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return Math.round(((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360);
+}
+
+function openMqttConfig() {
+  updateTopicPreview();
+  document.getElementById('mqtt-modal').style.display='flex';
+}
 function closeMqttConfig() { document.getElementById('mqtt-modal').style.display='none'; }
 
 function connectMQTT() {
