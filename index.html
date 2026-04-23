@@ -766,12 +766,12 @@ function startRace() {
   const txInterval = parseInt(document.getElementById('tx-interval').value);
   const dnfPct = parseInt(document.getElementById('dnf-pct').value) / 100;
   const SIM_TICK = 100; // ms real time
-  const simDt = SIM_TICK / 1000 * simSpeed; // simulated seconds per tick
 
   addLog('info', 'Race started! ' + participants.length + ' participants.');
   generateDeadzones();
 
   simInterval = setInterval(() => {
+    const simDt = SIM_TICK / 1000 * simSpeed;
     raceElapsed += simDt;
     const allDone = participants.every(p=>p.finished||p.dnf);
     if (allDone) { stopRace(); return; }
