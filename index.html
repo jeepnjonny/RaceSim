@@ -325,7 +325,7 @@
 
     <div id="map-overlay" style="display:none">
       <h3>Legend</h3>
-      <div class="legend-row" id="map-legend-row"><div class="legend-dot" id="map-legend-dot" style="background:var(--runner)"></div><span id="map-legend-label">Runner</span></div>
+      <div class="legend-row" id="map-legend-row"><div class="legend-dot" id="map-legend-dot" style="background:#4a9eff"></div><span id="map-legend-label">Runner</span></div>
       <div class="legend-row" id="map-deadzone-legend" style="display:none"><div style="width:18px;height:4px;background:#f85149;border-radius:2px;flex-shrink:0"></div><span style="color:#f85149">RF Dead Zone</span></div>
       <div class="legend-row" id="map-station-legend" style="display:none"><div style="width:14px;height:14px;border-radius:50%;background:#e8b339;border:2px solid #fff4;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:bold;color:#000">A</div><span style="color:#e8b339">Aid Station</span></div>
       <div style="border-top:1px solid var(--border); margin: 8px 0;"></div>
@@ -338,6 +338,14 @@
       <div style="border-top:1px solid var(--border); margin: 8px 0;"></div>
       <div style="font-size:10px;color:var(--text3)">Track dist</div>
       <div class="stat-val" id="stat-dist">0 km</div>
+      <div style="border-top:1px solid var(--border); margin: 8px 0;"></div>
+      <div style="font-size:10px;color:var(--text3);margin-bottom:4px">BASE MAP</div>
+      <select id="base-layer-select" onchange="setBaseLayer(this.value)" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 4px;border-radius:3px;font-family:var(--font);font-size:10px">
+        <option value="dark">Dark (CartoDB)</option>
+        <option value="topo">USGS Topo</option>
+        <option value="satellite">USGS Satellite</option>
+        <option value="hybrid">USGS Hybrid</option>
+      </select>
     </div>
   </div>
 
@@ -471,6 +479,14 @@ let trackLayer = null;
 let selectedRaceType = 'runner';
 let deadzones = [];
 let deadzoneLayerGroup = [];
+let currentBaseLayer = null;
+
+const BASE_LAYERS = {
+  dark:      { url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',                                                           opts: { subdomains:'abcd', maxZoom:19, maxNativeZoom:19, attribution:'&copy; CartoDB' } },
+  topo:      { url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}',                                 opts: { maxZoom:16, maxNativeZoom:16, attribution:'USGS The National Map' } },
+  satellite: { url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',                          opts: { maxZoom:16, maxNativeZoom:16, attribution:'USGS The National Map' } },
+  hybrid:    { url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/tile/{z}/{y}/{x}',                          opts: { maxZoom:16, maxNativeZoom:16, attribution:'USGS The National Map' } },
+};
 let allParsedPaths = [];
 let allParsedPoints = [];
 let activeStations = [];   // [{name, trackDist}] — sorted by trackDist
@@ -700,6 +716,18 @@ function clearStationMarkers() {
   if (stationMarkerLayer) stationMarkerLayer.clearLayers();
 }
 
+function setBaseLayer(key) {
+  if (!leafletMap) return;
+  const def = BASE_LAYERS[key] || BASE_LAYERS.dark;
+  if (currentBaseLayer) leafletMap.removeLayer(currentBaseLayer);
+  currentBaseLayer = L.tileLayer(def.url, def.opts).addTo(leafletMap);
+  currentBaseLayer.bringToBack();
+  leafletMap.setMaxZoom(def.opts.maxZoom);
+  if (leafletMap.getZoom() > def.opts.maxZoom) leafletMap.setZoom(def.opts.maxZoom);
+  const sel = document.getElementById('base-layer-select');
+  if (sel) sel.value = key;
+}
+
 function setTrack(pts) {
   trackPoints = pts;
   trackDistances = [0];
@@ -814,10 +842,7 @@ function initMap() {
 
   if (!leafletMap) {
     leafletMap = L.map('map', {zoomControl: true}).setView(trackPoints[0], 13);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; CartoDB',
-      subdomains: 'abcd', maxZoom: 19
-    }).addTo(leafletMap);
+    setBaseLayer(document.getElementById('base-layer-select')?.value || 'dark');
     markerLayer = L.layerGroup().addTo(leafletMap);
     stationMarkerLayer = L.layerGroup().addTo(leafletMap);
   } else {
@@ -847,7 +872,7 @@ function selectRaceType(type) {
   // Update map legend
   const dot = document.getElementById('map-legend-dot');
   const lbl = document.getElementById('map-legend-label');
-  if (dot) dot.style.background = 'var(--' + type + ')';
+  if (dot) dot.style.background = '#4a9eff';
   if (lbl) lbl.textContent = TYPE_LABELS[type];
   // Update topbar type indicator
   const ind = document.getElementById('topbar-type');
@@ -1096,7 +1121,7 @@ function resetRace() {
 function updateMarker(p) {
   if (!leafletMap) return;
   const pos = noisyPos(posOnTrack(p.dist), p);
-  const color = p.dnf ? '#484f58' : COLORS[p.type];
+  const color = p.dnf ? '#484f58' : '#4a9eff';
 
   if (!p.marker) {
     const icon = L.divIcon({
