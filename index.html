@@ -980,6 +980,7 @@ function startRace() {
 
   addLog('info', 'Race started! ' + participants.length + ' participants.');
   generateDeadzones();
+  participants.forEach(p => sendNodeInfo(p));
 
   simInterval = setInterval(() => {
     const simDt = SIM_TICK / 1000 * simSpeed;
@@ -1162,6 +1163,47 @@ function clearActiveLog() {
 
 // ===================== MQTT =====================
 let mqttViewerCount = 0;
+
+function sendNodeInfo(p) {
+  const region      = document.getElementById('mqtt-region').value || 'US';
+  const channelName = document.getElementById('mqtt-channel').value || 'LongFast';
+  const enc         = document.getElementById('mqtt-encrypt').checked ? 'e' : 'c';
+  const modem       = MODEM_PRESETS.LongFast;
+  const snr         = parseFloat((modem.snrMin + Math.random() * (modem.snrMax - modem.snrMin)).toFixed(2));
+  const rssi        = Math.floor(modem.rssiMin + Math.random() * (modem.rssiMax - modem.rssiMin));
+
+  const payload = {
+    channel: 0,
+    from: parseInt(p.nodeId.substring(1), 16),
+    hop_limit: 3,
+    hop_start: 3,
+    id: Math.floor(Math.random() * 0xFFFFFFFF),
+    payload: {
+      hw_model: 'SIM_TRACK',
+      id: p.nodeId,
+      is_licensed: false,
+      long_name: p.name,
+      role: 'CLIENT_MUTE',
+      short_name: p.name.substring(0, 4).toUpperCase(),
+    },
+    rssi,
+    sender: p.nodeId,
+    snr,
+    timestamp: Math.floor(Date.now() / 1000),
+    to: 4294967295,
+    type: 'nodeinfo',
+    want_ack: false,
+  };
+
+  const topic = `msh/${region}/${enc}/${channelName}/${p.nodeId}`;
+
+  if (mqttConnected && mqttClient && !mqttSimMode) {
+    try { mqttClient.publish(topic, JSON.stringify(payload)); } catch(e) {}
+  }
+
+  addMqttEntry(p, topic, payload, false);
+  addLog('info', `NodeInfo ${p.nodeId.substring(0, 10)} ${p.name}`);
+}
 
 function sendMqttPacket(p, pos) {
   const beaconDrop = parseInt(document.getElementById('beacon-drop').value) / 100;
