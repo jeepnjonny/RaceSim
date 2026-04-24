@@ -407,7 +407,7 @@
     <div class="form-group" style="margin-bottom:10px">
       <div class="checkbox-row">
         <input type="checkbox" id="mqtt-encrypt" onchange="updateTopicPreview()">
-        <label for="mqtt-encrypt">Encrypt payload (topic: msh/…/e)</label>
+        <label for="mqtt-encrypt">Encrypt payload (msh/…/2/c vs msh/…/2/json)</label>
       </div>
     </div>
     <div class="form-group" id="mqtt-psk-group" style="margin-bottom:10px;display:none">
@@ -415,7 +415,7 @@
       <input type="text" id="mqtt-psk" placeholder="AQ==" autocomplete="off">
     </div>
     <div style="font-size:10px;color:var(--text3);margin-bottom:10px;line-height:1.5">
-      Topic: <span id="mqtt-topic-preview" style="color:var(--accent4)">msh/US/c/LongFast/!xxxxxxxx</span>
+      Topic: <span id="mqtt-topic-preview" style="color:var(--accent4)">msh/US/2/json/LongFast/!xxxxxxxx</span>
     </div>
     <div class="form-group" style="margin-bottom:10px">
       <div class="checkbox-row">
@@ -1167,7 +1167,7 @@ let mqttViewerCount = 0;
 function sendNodeInfo(p) {
   const region      = document.getElementById('mqtt-region').value || 'US';
   const channelName = document.getElementById('mqtt-channel').value || 'LongFast';
-  const enc         = document.getElementById('mqtt-encrypt').checked ? 'e' : 'c';
+  const enc         = document.getElementById('mqtt-encrypt').checked ? 'c' : 'json';
   const modem       = MODEM_PRESETS.LongFast;
   const snr         = parseFloat((modem.snrMin + Math.random() * (modem.snrMax - modem.snrMin)).toFixed(2));
   const rssi        = Math.floor(modem.rssiMin + Math.random() * (modem.rssiMax - modem.rssiMin));
@@ -1195,7 +1195,7 @@ function sendNodeInfo(p) {
     want_ack: false,
   };
 
-  const topic = `msh/${region}/${enc}/${channelName}/${p.nodeId}`;
+  const topic = `msh/${region}/2/${enc}/${channelName}/${p.nodeId}`;
 
   if (mqttConnected && mqttClient && !mqttSimMode) {
     try { mqttClient.publish(topic, JSON.stringify(payload)); } catch(e) {}
@@ -1213,7 +1213,7 @@ function sendMqttPacket(p, pos) {
   mqttMsgCount++;
   const region      = document.getElementById('mqtt-region').value || 'US';
   const channelName = document.getElementById('mqtt-channel').value || 'LongFast';
-  const enc         = document.getElementById('mqtt-encrypt').checked ? 'e' : 'c';
+  const enc         = document.getElementById('mqtt-encrypt').checked ? 'c' : 'json';
   const modem       = MODEM_PRESETS.LongFast;
   const snr = parseFloat((modem.snrMin + Math.random() * (modem.snrMax - modem.snrMin)).toFixed(2));
   const rssi = Math.floor(modem.rssiMin + Math.random() * (modem.rssiMax - modem.rssiMin));
@@ -1242,7 +1242,7 @@ function sendMqttPacket(p, pos) {
     want_ack: false,
   };
 
-  const topic = `msh/${region}/${enc}/${channelName}/${p.nodeId}`;
+  const topic = `msh/${region}/2/${enc}/${channelName}/${p.nodeId}`;
 
   if (!dropped && mqttConnected && mqttClient && !mqttSimMode) {
     try { mqttClient.publish(topic, JSON.stringify(payload)); } catch(e){}
@@ -1300,8 +1300,8 @@ function escHtml(s) {
 function updateTopicPreview() {
   const region  = document.getElementById('mqtt-region').value || 'US';
   const channel = document.getElementById('mqtt-channel').value || 'LongFast';
-  const enc     = document.getElementById('mqtt-encrypt').checked ? 'e' : 'c';
-  document.getElementById('mqtt-topic-preview').textContent = `msh/${region}/${enc}/${channel}/!xxxxxxxx`;
+  const enc     = document.getElementById('mqtt-encrypt').checked ? 'c' : 'json';
+  document.getElementById('mqtt-topic-preview').textContent = `msh/${region}/2/${enc}/${channel}/!xxxxxxxx`;
   document.getElementById('mqtt-psk-group').style.display = document.getElementById('mqtt-encrypt').checked ? '' : 'none';
 }
 
