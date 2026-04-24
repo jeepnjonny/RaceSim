@@ -961,7 +961,7 @@ function renderParticipantList() {
 // ===================== RACE LOGIC =====================
 function startRace() {
   if (!trackPoints.length) { alert('Load a KML/GPX track first.'); return; }
-  if (!participants.length) { alert('Generate participants first.'); return; }
+  if (!participants.length) generateParticipants();
   if (simRunning) return;
 
   simRunning = true;
