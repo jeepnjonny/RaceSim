@@ -394,29 +394,28 @@
         <input type="password" id="mqtt-pass" value="racesim123" placeholder="">
       </div>
     </div>
-    <div class="form-group" style="margin-bottom:10px">
-      <label>TOPIC PREFIX</label>
-      <input type="text" id="mqtt-topic" value="msh/US/2/json" placeholder="msh/US/2/json" oninput="updateTopicPreview()">
+    <div class="form-row" style="margin-bottom:10px">
+      <div class="form-group">
+        <label>REGION</label>
+        <input type="text" id="mqtt-region" value="US" placeholder="US" oninput="updateTopicPreview()">
+      </div>
+      <div class="form-group">
+        <label>CHANNEL NAME</label>
+        <input type="text" id="mqtt-channel" value="LongFast" placeholder="LongFast" oninput="updateTopicPreview()">
+      </div>
     </div>
     <div class="form-group" style="margin-bottom:10px">
-      <label>MODEM PRESET</label>
-      <select id="mqtt-preset" onchange="onPresetChange()">
-        <option value="LongFast">Long Fast — SF11 BW250 (default, ~12 km)</option>
-        <option value="LongSlow">Long Slow — SF12 BW125 (~18 km)</option>
-        <option value="VeryLongSlow">Very Long Slow — SF12 BW62.5 (max range)</option>
-        <option value="MediumSlow">Medium Slow — SF10 BW125</option>
-        <option value="MediumFast">Medium Fast — SF9 BW250</option>
-        <option value="ShortSlow">Short Slow — SF8 BW125</option>
-        <option value="ShortFast">Short Fast — SF7 BW250</option>
-        <option value="ShortTurbo">Short Turbo — SF7 BW500 (min latency)</option>
-      </select>
+      <div class="checkbox-row">
+        <input type="checkbox" id="mqtt-encrypt" onchange="updateTopicPreview()">
+        <label for="mqtt-encrypt">Encrypt payload (topic: msh/…/e)</label>
+      </div>
     </div>
-    <div class="form-group" style="margin-bottom:10px">
-      <label>CHANNEL NAME <span style="color:var(--text3);font-size:10px">used in topic path · defaults to preset name</span></label>
-      <input type="text" id="mqtt-channel" value="LongFast" placeholder="LongFast" oninput="updateTopicPreview()">
+    <div class="form-group" id="mqtt-psk-group" style="margin-bottom:10px;display:none">
+      <label>CHANNEL PSK <span style="color:var(--text3);font-size:10px">base64-encoded AES key</span></label>
+      <input type="text" id="mqtt-psk" placeholder="AQ==" autocomplete="off">
     </div>
     <div style="font-size:10px;color:var(--text3);margin-bottom:10px;line-height:1.5">
-      Topic: <span id="mqtt-topic-preview" style="color:var(--accent4)">msh/US/2/json/LongFast/!xxxxxxxx</span>
+      Topic: <span id="mqtt-topic-preview" style="color:var(--accent4)">msh/US/c/LongFast/!xxxxxxxx</span>
     </div>
     <div class="form-group" style="margin-bottom:10px">
       <div class="checkbox-row">
@@ -1170,9 +1169,10 @@ function sendMqttPacket(p, pos) {
   if (dropped) droppedCount++;
 
   mqttMsgCount++;
-  const presetKey = document.getElementById('mqtt-preset').value || 'LongFast';
-  const channelName = document.getElementById('mqtt-channel').value || presetKey;
-  const modem = MODEM_PRESETS[presetKey] || MODEM_PRESETS.LongFast;
+  const region      = document.getElementById('mqtt-region').value || 'US';
+  const channelName = document.getElementById('mqtt-channel').value || 'LongFast';
+  const enc         = document.getElementById('mqtt-encrypt').checked ? 'e' : 'c';
+  const modem       = MODEM_PRESETS.LongFast;
   const snr = parseFloat((modem.snrMin + Math.random() * (modem.snrMax - modem.snrMin)).toFixed(2));
   const rssi = Math.floor(modem.rssiMin + Math.random() * (modem.rssiMax - modem.rssiMin));
 
@@ -1200,7 +1200,7 @@ function sendMqttPacket(p, pos) {
     want_ack: false,
   };
 
-  const topic = `${document.getElementById('mqtt-topic').value||'msh/US/2/json'}/${channelName}/${p.nodeId}`;
+  const topic = `msh/${region}/${enc}/${channelName}/${p.nodeId}`;
 
   if (!dropped && mqttConnected && mqttClient && !mqttSimMode) {
     try { mqttClient.publish(topic, JSON.stringify(payload)); } catch(e){}
@@ -1255,16 +1255,12 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function onPresetChange() {
-  const preset = document.getElementById('mqtt-preset').value;
-  document.getElementById('mqtt-channel').value = preset;
-  updateTopicPreview();
-}
-
 function updateTopicPreview() {
-  const prefix = document.getElementById('mqtt-topic').value || 'msh/US/2/json';
+  const region  = document.getElementById('mqtt-region').value || 'US';
   const channel = document.getElementById('mqtt-channel').value || 'LongFast';
-  document.getElementById('mqtt-topic-preview').textContent = `${prefix}/${channel}/!xxxxxxxx`;
+  const enc     = document.getElementById('mqtt-encrypt').checked ? 'e' : 'c';
+  document.getElementById('mqtt-topic-preview').textContent = `msh/${region}/${enc}/${channel}/!xxxxxxxx`;
+  document.getElementById('mqtt-psk-group').style.display = document.getElementById('mqtt-encrypt').checked ? '' : 'none';
 }
 
 function headingOnTrack(dist) {
