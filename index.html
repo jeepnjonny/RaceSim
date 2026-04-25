@@ -1175,16 +1175,15 @@ function sendNodeInfo(p) {
   const payload = {
     channel: 0,
     from: parseInt(p.nodeId.substring(1), 16),
-    hop_limit: 3,
-    hop_start: 3,
+    hop_start: 5,
+    hops_away: 0,
     id: Math.floor(Math.random() * 0xFFFFFFFF),
     payload: {
-      hw_model: 'SIM_TRACK',
+      hardware: 0,
       id: p.nodeId,
-      is_licensed: false,
-      long_name: p.name,
-      role: 'CLIENT_MUTE',
-      short_name: p.name.substring(0, 4).toUpperCase(),
+      longname: p.name,
+      role: 1,
+      shortname: p.name.substring(0, 4).toUpperCase(),
     },
     rssi,
     sender: p.nodeId,
@@ -1192,7 +1191,6 @@ function sendNodeInfo(p) {
     timestamp: Math.floor(Date.now() / 1000),
     to: 4294967295,
     type: 'nodeinfo',
-    want_ack: false,
   };
 
   const topic = `msh/${region}/2/${enc}/${channelName}/${p.nodeId}`;
@@ -1221,25 +1219,20 @@ function sendMqttPacket(p, pos) {
   const payload = {
     channel: 0,
     from: parseInt(p.nodeId.substring(1), 16),
-    hop_limit: 3,
-    hop_start: 3,
+    hop_start: 5,
+    hops_away: 0,
     id: Math.floor(Math.random()*0xFFFFFFFF),
     payload: {
       altitude: 0,
-      ground_speed: Math.round(p.currentSpeed * 3.6),
-      ground_track: headingOnTrack(p.dist),
       latitude_i: Math.round(pos[0]*1e7),
       longitude_i: Math.round(pos[1]*1e7),
-      precision_bits: 32,
+      precision_bits: 27,
       time: Math.floor(Date.now()/1000),
     },
-    rssi,
     sender: p.nodeId,
-    snr,
     timestamp: Math.floor(Date.now()/1000),
     to: 4294967295,
     type: 'position',
-    want_ack: false,
   };
 
   const topic = `msh/${region}/2/${enc}/${channelName}/${p.nodeId}`;
