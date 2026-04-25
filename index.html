@@ -115,6 +115,7 @@
   .mqtt-entry-node { color: var(--accent4); font-weight: bold; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mqtt-entry-time { color: var(--text3); white-space: nowrap; }
   .mqtt-entry-dropped { color: var(--accent3); font-size: 9px; }
+  .mqtt-entry-enc { color: var(--accent2); font-size: 9px; }
   .mqtt-entry-body { display: none; background: var(--bg); padding: 6px 8px; font-size: 10px; color: var(--text2); white-space: pre; overflow-x: auto; border-top: 1px solid var(--border); line-height: 1.5; }
   .mqtt-entry.expanded .mqtt-entry-body { display: block; }
   .mqtt-topic-line { font-size: 9px; color: var(--text3); padding: 0 8px 4px; word-break: break-all; line-height: 1.4; }
@@ -406,16 +407,20 @@
     </div>
     <div class="form-group" style="margin-bottom:10px">
       <div class="checkbox-row">
+        <input type="checkbox" id="mqtt-json" checked onchange="updateTopicPreview()">
+        <label for="mqtt-json">JSON unencrypted <span style="color:var(--text3);font-size:10px">msh/…/2/json/…</span></label>
+      </div>
+      <div class="checkbox-row" style="margin-top:6px">
         <input type="checkbox" id="mqtt-encrypt" onchange="updateTopicPreview()">
-        <label for="mqtt-encrypt">Encrypt payload (msh/…/2/c vs msh/…/2/json)</label>
+        <label for="mqtt-encrypt">Encrypted protobuf <span style="color:var(--text3);font-size:10px">msh/…/2/c/…</span></label>
       </div>
     </div>
     <div class="form-group" id="mqtt-psk-group" style="margin-bottom:10px;display:none">
-      <label>CHANNEL PSK <span style="color:var(--text3);font-size:10px">base64-encoded AES key</span></label>
-      <input type="text" id="mqtt-psk" placeholder="AQ==" autocomplete="off">
+      <label>CHANNEL PSK <span style="color:var(--text3);font-size:10px">base64-encoded AES-128 key (default AQ==)</span></label>
+      <input type="text" id="mqtt-psk" placeholder="AQ==" value="AQ==" autocomplete="off">
     </div>
     <div style="font-size:10px;color:var(--text3);margin-bottom:10px;line-height:1.5">
-      Topic: <span id="mqtt-topic-preview" style="color:var(--accent4)">msh/US/2/json/LongFast/!xxxxxxxx</span>
+      Topics:<br><span id="mqtt-topic-preview" style="color:var(--accent4)">msh/US/2/json/LongFast/!xxxxxxxx</span>
     </div>
     <div class="form-group" style="margin-bottom:10px">
       <div class="checkbox-row">
@@ -1161,49 +1166,120 @@ function clearActiveLog() {
   else { document.getElementById('mqtt-log-body').innerHTML = ''; mqttViewerCount = 0; }
 }
 
+// ===================== PROTOBUF / CRYPTO =====================
+// Minimal protobuf encoder for Meshtastic ServiceEnvelope (mesh.proto + mqtt.proto)
+function _pbConcat(...arrays) {
+  let len = 0; for (const a of arrays) len += a.length;
+  const out = new Uint8Array(len); let off = 0;
+  for (const a of arrays) { out.set(a, off); off += a.length; }
+  return out;
+}
+function _pbVarint(n) {
+  n = n >>> 0;
+  const b = [];
+  do { let v = n & 0x7f; n >>>= 7; if (n) v |= 0x80; b.push(v); } while (n);
+  return new Uint8Array(b);
+}
+function _pbWv(fn, n)    { return _pbConcat(_pbVarint((fn<<3)|0), _pbVarint(n>>>0)); } // wire 0: varint
+function _pbW5(fn, n)    { const t=_pbVarint((fn<<3)|5),v=new Uint8Array(4); new DataView(v.buffer).setUint32(0,n>>>0,true); return _pbConcat(t,v); } // wire 5: fixed32
+function _pbW5s(fn, n)   { const t=_pbVarint((fn<<3)|5),v=new Uint8Array(4); new DataView(v.buffer).setInt32(0,n|0,true);   return _pbConcat(t,v); } // wire 5: sfixed32
+function _pbWb(fn, b)    { return _pbConcat(_pbVarint((fn<<3)|2), _pbVarint(b.length), b); } // wire 2: bytes
+function _pbWs(fn, s)    { return _pbWb(fn, new TextEncoder().encode(s)); }                  // wire 2: string
+
+// Position proto (mesh.proto): sfixed32 lat/lon, int32 alt, fixed32 time, uint32 precision_bits=23
+function _pbPosition(latI, lonI, altM, ts, precBits) {
+  return _pbConcat(_pbW5s(1,latI), _pbW5s(2,lonI), _pbWv(3,altM), _pbW5(4,ts), _pbWv(23,precBits));
+}
+// User proto (mesh.proto): string id=1 long_name=2 short_name=3, enum hw_model=5 role=7
+function _pbUser(id, longName, shortName, hwModel, role) {
+  return _pbConcat(_pbWs(1,id), _pbWs(2,longName), _pbWs(3,shortName), _pbWv(5,hwModel), _pbWv(7,role));
+}
+// Data wrapper: portnum=1 (varint), payload=2 (bytes)
+function _pbData(portnum, payload) { return _pbConcat(_pbWv(1,portnum), _pbWb(2,payload)); }
+// MeshPacket (encrypted path): fixed32 from=1 to=2, uint32 channel=3, bytes encrypted=5,
+//   fixed32 id=6, uint32 hop_limit=9, uint32 hop_start=15
+function _pbMeshPktEnc(from, to, ch, id, hopLimit, hopStart, encBytes) {
+  return _pbConcat(_pbW5(1,from),_pbW5(2,to),_pbWv(3,ch),_pbWb(5,encBytes),_pbW5(6,id),_pbWv(9,hopLimit),_pbWv(15,hopStart));
+}
+// ServiceEnvelope (mqtt.proto): MeshPacket=1, string channel_id=2, string gateway_id=3
+function _pbServiceEnvelope(pktBytes, channelId, gatewayId) {
+  return _pbConcat(_pbWb(1,pktBytes), _pbWs(2,channelId), _pbWs(3,gatewayId));
+}
+
+// AES-CTR nonce: [packetId uint32 LE][0x00*4][fromNode uint32 LE][0x00*4] (CryptoEngine.h)
+function _meshNonce(packetId, fromNode) {
+  const n=new Uint8Array(16), dv=new DataView(n.buffer);
+  dv.setUint32(0,packetId,true); dv.setUint32(8,fromNode,true); return n;
+}
+// Default key for PSK "AQ==" (0x01) — channel.pb.h hardcoded default
+const _MESH_DEFAULT_KEY = new Uint8Array([0xd4,0xf1,0xbb,0x3a,0x20,0x29,0x07,0x59,0xf0,0xbc,0xff,0xab,0xcf,0x4e,0x69,0x01]);
+async function _meshKeyBytes(pskB64) {
+  if (!pskB64 || pskB64 === 'AQ==') return _MESH_DEFAULT_KEY;
+  try {
+    const raw = Uint8Array.from(atob(pskB64), c => c.charCodeAt(0));
+    if (raw.length === 1 && raw[0] === 1) return _MESH_DEFAULT_KEY;
+    if (raw.length >= 16) return raw.slice(0, raw.length >= 32 ? 32 : 16);
+    const p = new Uint8Array(16); p.set(raw); return p;
+  } catch { return _MESH_DEFAULT_KEY; }
+}
+// Build a complete binary ServiceEnvelope with AES-CTR encrypted Data payload
+async function _buildServiceEnvelope(portnum, innerBytes, fromNode, toNode, packetId, channelName, pskB64) {
+  const keyBytes = await _meshKeyBytes(pskB64);
+  const nonce    = _meshNonce(packetId, fromNode);
+  const keyObj   = await crypto.subtle.importKey('raw', keyBytes, {name:'AES-CTR'}, false, ['encrypt']);
+  const encBuf   = await crypto.subtle.encrypt({name:'AES-CTR', counter:nonce, length:32}, keyObj, _pbData(portnum, innerBytes));
+  const pkt      = _pbMeshPktEnc(fromNode, toNode, 0, packetId, 3, 5, new Uint8Array(encBuf));
+  return _pbServiceEnvelope(pkt, channelName, '!'+fromNode.toString(16).padStart(8,'0'));
+}
+
 // ===================== MQTT =====================
 let mqttViewerCount = 0;
 
-function sendNodeInfo(p) {
+async function sendNodeInfo(p) {
   const region      = document.getElementById('mqtt-region').value || 'US';
   const channelName = document.getElementById('mqtt-channel').value || 'LongFast';
-  const enc         = document.getElementById('mqtt-encrypt').checked ? 'c' : 'json';
+  const wantJson    = document.getElementById('mqtt-json').checked;
+  const wantEnc     = document.getElementById('mqtt-encrypt').checked;
+  const psk         = document.getElementById('mqtt-psk').value || 'AQ==';
   const modem       = MODEM_PRESETS.LongFast;
   const snr         = parseFloat((modem.snrMin + Math.random() * (modem.snrMax - modem.snrMin)).toFixed(2));
   const rssi        = Math.floor(modem.rssiMin + Math.random() * (modem.rssiMax - modem.rssiMin));
 
-  const payload = {
-    channel: 0,
-    from: parseInt(p.nodeId.substring(1), 16),
-    hop_start: 5,
-    hops_away: 0,
-    id: Math.floor(Math.random() * 0xFFFFFFFF),
-    payload: {
-      hardware: 0,
-      id: p.nodeId,
-      longname: p.name,
-      role: 1,
-      shortname: p.name.substring(0, 4).toUpperCase(),
-    },
-    rssi,
-    sender: p.nodeId,
-    snr,
-    timestamp: Math.floor(Date.now() / 1000),
-    to: 4294967295,
-    type: 'nodeinfo',
+  const fromNode  = parseInt(p.nodeId.substring(1), 16);
+  const packetId  = Math.floor(Math.random() * 0xFFFFFFFF);
+  const ts        = Math.floor(Date.now() / 1000);
+  const shortName = p.name.substring(0, 4).toUpperCase();
+
+  const jsonPayload = {
+    channel: 0, from: fromNode, hop_start: 5, hops_away: 0, id: packetId,
+    payload: { hardware: 0, id: p.nodeId, longname: p.name, role: 1, shortname: shortName },
+    rssi, sender: p.nodeId, snr, timestamp: ts, to: 4294967295, type: 'nodeinfo',
   };
 
-  const topic = `msh/${region}/2/${enc}/${channelName}/${p.nodeId}`;
-
-  if (mqttConnected && mqttClient && !mqttSimMode) {
-    try { mqttClient.publish(topic, JSON.stringify(payload)); } catch(e) {}
+  if (wantJson) {
+    const topic = `msh/${region}/2/json/${channelName}/${p.nodeId}`;
+    if (mqttConnected && mqttClient && !mqttSimMode) {
+      try { mqttClient.publish(topic, JSON.stringify(jsonPayload)); } catch(e) {}
+    }
+    addMqttEntry(p, topic, jsonPayload, false, false);
   }
 
-  addMqttEntry(p, topic, payload, false);
+  if (wantEnc) {
+    const topic = `msh/${region}/2/c/${channelName}/${p.nodeId}`;
+    try {
+      const userBytes = _pbUser(p.nodeId, p.name, shortName, 0, 1);
+      const envelope  = await _buildServiceEnvelope(4, userBytes, fromNode, 0xFFFFFFFF, packetId, channelName, psk);
+      if (mqttConnected && mqttClient && !mqttSimMode) {
+        mqttClient.publish(topic, envelope);
+      }
+    } catch(e) { console.warn('NodeInfo encrypt failed:', e); }
+    addMqttEntry(p, topic, jsonPayload, false, true);
+  }
+
   addLog('info', `NodeInfo ${p.nodeId.substring(0, 10)} ${p.name}`);
 }
 
-function sendMqttPacket(p, pos) {
+async function sendMqttPacket(p, pos) {
   const beaconDrop = parseInt(document.getElementById('beacon-drop').value) / 100;
   const dropped = Math.random() < beaconDrop;
   if (dropped) droppedCount++;
@@ -1211,40 +1287,44 @@ function sendMqttPacket(p, pos) {
   mqttMsgCount++;
   const region      = document.getElementById('mqtt-region').value || 'US';
   const channelName = document.getElementById('mqtt-channel').value || 'LongFast';
-  const enc         = document.getElementById('mqtt-encrypt').checked ? 'c' : 'json';
-  const modem       = MODEM_PRESETS.LongFast;
-  const snr = parseFloat((modem.snrMin + Math.random() * (modem.snrMax - modem.snrMin)).toFixed(2));
-  const rssi = Math.floor(modem.rssiMin + Math.random() * (modem.rssiMax - modem.rssiMin));
+  const wantJson    = document.getElementById('mqtt-json').checked;
+  const wantEnc     = document.getElementById('mqtt-encrypt').checked;
+  const psk         = document.getElementById('mqtt-psk').value || 'AQ==';
 
-  const payload = {
-    channel: 0,
-    from: parseInt(p.nodeId.substring(1), 16),
-    hop_start: 5,
-    hops_away: 0,
-    id: Math.floor(Math.random()*0xFFFFFFFF),
-    payload: {
-      altitude: 0,
-      latitude_i: Math.round(pos[0]*1e7),
-      longitude_i: Math.round(pos[1]*1e7),
-      precision_bits: 27,
-      time: Math.floor(Date.now()/1000),
-    },
-    sender: p.nodeId,
-    timestamp: Math.floor(Date.now()/1000),
-    to: 4294967295,
-    type: 'position',
+  const fromNode = parseInt(p.nodeId.substring(1), 16);
+  const packetId = Math.floor(Math.random() * 0xFFFFFFFF);
+  const ts       = Math.floor(Date.now() / 1000);
+  const latI     = Math.round(pos[0] * 1e7);
+  const lonI     = Math.round(pos[1] * 1e7);
+
+  const jsonPayload = {
+    channel: 0, from: fromNode, hop_start: 5, hops_away: 0, id: packetId,
+    payload: { altitude: 0, latitude_i: latI, longitude_i: lonI, precision_bits: 27, time: ts },
+    sender: p.nodeId, timestamp: ts, to: 4294967295, type: 'position',
   };
 
-  const topic = `msh/${region}/2/${enc}/${channelName}/${p.nodeId}`;
-
-  if (!dropped && mqttConnected && mqttClient && !mqttSimMode) {
-    try { mqttClient.publish(topic, JSON.stringify(payload)); } catch(e){}
+  if (wantJson) {
+    const topic = `msh/${region}/2/json/${channelName}/${p.nodeId}`;
+    if (!dropped && mqttConnected && mqttClient && !mqttSimMode) {
+      try { mqttClient.publish(topic, JSON.stringify(jsonPayload)); } catch(e) {}
+    }
+    addMqttEntry(p, topic, jsonPayload, dropped, false);
   }
 
-  // Add to MQTT viewer
-  addMqttEntry(p, topic, payload, dropped);
+  if (wantEnc) {
+    const topic = `msh/${region}/2/c/${channelName}/${p.nodeId}`;
+    if (!dropped) {
+      try {
+        const posBytes = _pbPosition(latI, lonI, 0, ts, 27);
+        const envelope = await _buildServiceEnvelope(3, posBytes, fromNode, 0xFFFFFFFF, packetId, channelName, psk);
+        if (mqttConnected && mqttClient && !mqttSimMode) {
+          mqttClient.publish(topic, envelope);
+        }
+      } catch(e) { console.warn('Position encrypt failed:', e); }
+    }
+    addMqttEntry(p, topic, jsonPayload, dropped, true);
+  }
 
-  // Add to events log for first TX or every 10th
   if (p.txCount === 1 || mqttMsgCount % 10 === 0) {
     if (dropped) {
       addLog('warn', `DROP ${p.nodeId.substring(0,10)} #${p.id} ${p.name}`);
@@ -1254,7 +1334,7 @@ function sendMqttPacket(p, pos) {
   }
 }
 
-function addMqttEntry(p, topic, payload, dropped) {
+function addMqttEntry(p, topic, payload, dropped, isEncrypted) {
   const body = document.getElementById('mqtt-log-body');
   mqttViewerCount++;
   const now = new Date();
@@ -1265,16 +1345,18 @@ function addMqttEntry(p, topic, payload, dropped) {
   if (dropped) entry.style.opacity = '0.45';
 
   const jsonStr = JSON.stringify(payload, null, 2);
+  const encNote = isEncrypted ? '\n// published as AES-CTR encrypted binary ServiceEnvelope' : '';
 
   entry.innerHTML = `
     <div class="mqtt-entry-header" onclick="this.parentElement.classList.toggle('expanded')">
       <span class="mqtt-entry-seq">#${mqttViewerCount}</span>
       <span class="mqtt-entry-node">${p.nodeId}</span>
       <span class="mqtt-entry-time">${time}</span>
+      ${isEncrypted ? '<span class="mqtt-entry-enc">ENC</span>' : ''}
       ${dropped ? '<span class="mqtt-entry-dropped">DROPPED</span>' : ''}
     </div>
     <div class="mqtt-topic-line">${topic}</div>
-    <div class="mqtt-entry-body">${escHtml(jsonStr)}</div>
+    <div class="mqtt-entry-body">${escHtml(jsonStr)}${escHtml(encNote)}</div>
   `;
 
   body.appendChild(entry);
@@ -1291,11 +1373,17 @@ function escHtml(s) {
 }
 
 function updateTopicPreview() {
-  const region  = document.getElementById('mqtt-region').value || 'US';
-  const channel = document.getElementById('mqtt-channel').value || 'LongFast';
-  const enc     = document.getElementById('mqtt-encrypt').checked ? 'c' : 'json';
-  document.getElementById('mqtt-topic-preview').textContent = `msh/${region}/2/${enc}/${channel}/!xxxxxxxx`;
-  document.getElementById('mqtt-psk-group').style.display = document.getElementById('mqtt-encrypt').checked ? '' : 'none';
+  const region   = document.getElementById('mqtt-region').value || 'US';
+  const channel  = document.getElementById('mqtt-channel').value || 'LongFast';
+  const wantJson = document.getElementById('mqtt-json').checked;
+  const wantEnc  = document.getElementById('mqtt-encrypt').checked;
+  const lines = [];
+  if (wantJson) lines.push(`msh/${region}/2/json/${channel}/!xxxxxxxx`);
+  if (wantEnc)  lines.push(`msh/${region}/2/c/${channel}/!xxxxxxxx`);
+  if (!lines.length) lines.push('(no output selected)');
+  document.getElementById('mqtt-topic-preview').innerHTML =
+    lines.map(l => `<span style="color:var(--accent4)">${l}</span>`).join('<br>');
+  document.getElementById('mqtt-psk-group').style.display = wantEnc ? '' : 'none';
 }
 
 function headingOnTrack(dist) {
