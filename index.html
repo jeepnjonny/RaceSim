@@ -983,13 +983,17 @@ function startRace() {
   const txInterval = parseInt(document.getElementById('tx-interval').value);
   const dnfPct = parseInt(document.getElementById('dnf-pct').value) / 100;
   const SIM_TICK = 100; // ms real time
+  let lastTick = performance.now();
 
   addLog('info', 'Race started! ' + participants.length + ' participants.');
   generateDeadzones();
   participants.forEach(p => sendNodeInfo(p));
 
   simInterval = setInterval(() => {
-    const simDt = SIM_TICK / 1000 * simSpeed;
+    const now = performance.now();
+    const realDt = Math.min((now - lastTick) / 1000, 1.0); // cap at 1s to avoid huge jumps on wake
+    lastTick = now;
+    const simDt = realDt * simSpeed;
     raceElapsed += simDt;
     const allDone = participants.every(p=>p.finished||p.dnf);
     if (allDone) { stopRace(); return; }
