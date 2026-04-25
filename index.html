@@ -913,6 +913,7 @@ function generateParticipants() {
       finishTime: null,
       lastTx: 0,
       txCount: 0,
+      lastNodeInfo: Math.random() * 900, // stagger initial nodeinfo rebroadcasts (0–15 min)
       speedTimer: 0,
       speedInterval: 30 + Math.random()*60,
       marker: null,
@@ -1008,6 +1009,8 @@ function startRace() {
           p.lastTx = 0; p.txCount++;
           sendMqttPacket(p, noisyPos(posOnTrack(p.dist), p));
         }
+        p.lastNodeInfo += simDt;
+        if (p.lastNodeInfo >= 900) { p.lastNodeInfo = 0; sendNodeInfo(p); }
         updateMarker(p);
         return;
       }
@@ -1074,6 +1077,10 @@ function startRace() {
         }
       }
 
+      // NodeInfo re-beacon every 15 simulated minutes
+      p.lastNodeInfo += simDt;
+      if (p.lastNodeInfo >= 900) { p.lastNodeInfo = 0; sendNodeInfo(p); }
+
       updateMarker(p);
     });
 
@@ -1097,7 +1104,7 @@ function resetRace() {
   stopRace();
   participants.forEach(p => {
     p.dist = 0; p.finished = false; p.dnf = false;
-    p.finishTime = null; p.lastTx = 0; p.txCount = 0;
+    p.finishTime = null; p.lastTx = 0; p.txCount = 0; p.lastNodeInfo = Math.random() * 900;
     p.currentSpeed = p.baseSpeed;
     p.visitedStations = new Set();
     p.atStation = false; p.stopTimer = 0; p.currentStation = '';
