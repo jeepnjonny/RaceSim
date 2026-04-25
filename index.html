@@ -412,7 +412,7 @@
       </div>
       <div class="checkbox-row" style="margin-top:6px">
         <input type="checkbox" id="mqtt-encrypt" onchange="updateTopicPreview()">
-        <label for="mqtt-encrypt">Encrypted protobuf <span style="color:var(--text3);font-size:10px">msh/…/2/c/…</span></label>
+        <label for="mqtt-encrypt">Encrypted protobuf <span style="color:var(--text3);font-size:10px">msh/…/2/e/…</span></label>
       </div>
     </div>
     <div class="form-group" id="mqtt-psk-group" style="margin-bottom:10px;display:none">
@@ -1222,13 +1222,21 @@ async function _meshKeyBytes(pskB64) {
     const p = new Uint8Array(16); p.set(raw); return p;
   } catch { return _MESH_DEFAULT_KEY; }
 }
+// Channel hash: XOR of all channel-name bytes + all PSK key bytes (matches firmware MeshPacket.channel)
+function _channelHash(channelName, keyBytes) {
+  let h = 0;
+  for (const b of new TextEncoder().encode(channelName)) h ^= b;
+  for (const b of keyBytes) h ^= b;
+  return h & 0xFF;
+}
 // Build a complete binary ServiceEnvelope with AES-CTR encrypted Data payload
 async function _buildServiceEnvelope(portnum, innerBytes, fromNode, toNode, packetId, channelName, pskB64) {
   const keyBytes = await _meshKeyBytes(pskB64);
   const nonce    = _meshNonce(packetId, fromNode);
+  const chHash   = _channelHash(channelName, keyBytes);
   const keyObj   = await crypto.subtle.importKey('raw', keyBytes, {name:'AES-CTR'}, false, ['encrypt']);
   const encBuf   = await crypto.subtle.encrypt({name:'AES-CTR', counter:nonce, length:32}, keyObj, _pbData(portnum, innerBytes));
-  const pkt      = _pbMeshPktEnc(fromNode, toNode, 0, packetId, 3, 5, new Uint8Array(encBuf));
+  const pkt      = _pbMeshPktEnc(fromNode, toNode, chHash, packetId, 5, 5, new Uint8Array(encBuf));
   return _pbServiceEnvelope(pkt, channelName, '!'+fromNode.toString(16).padStart(8,'0'));
 }
 
@@ -1265,7 +1273,7 @@ async function sendNodeInfo(p) {
   }
 
   if (wantEnc) {
-    const topic = `msh/${region}/2/c/${channelName}/${p.nodeId}`;
+    const topic = `msh/${region}/2/e/${channelName}/${p.nodeId}`;
     try {
       const userBytes = _pbUser(p.nodeId, p.name, shortName, 0, 1);
       const envelope  = await _buildServiceEnvelope(4, userBytes, fromNode, 0xFFFFFFFF, packetId, channelName, psk);
@@ -1312,7 +1320,7 @@ async function sendMqttPacket(p, pos) {
   }
 
   if (wantEnc) {
-    const topic = `msh/${region}/2/c/${channelName}/${p.nodeId}`;
+    const topic = `msh/${region}/2/e/${channelName}/${p.nodeId}`;
     if (!dropped) {
       try {
         const posBytes = _pbPosition(latI, lonI, 0, ts, 27);
@@ -1379,7 +1387,7 @@ function updateTopicPreview() {
   const wantEnc  = document.getElementById('mqtt-encrypt').checked;
   const lines = [];
   if (wantJson) lines.push(`msh/${region}/2/json/${channel}/!xxxxxxxx`);
-  if (wantEnc)  lines.push(`msh/${region}/2/c/${channel}/!xxxxxxxx`);
+  if (wantEnc)  lines.push(`msh/${region}/2/e/${channel}/!xxxxxxxx`);
   if (!lines.length) lines.push('(no output selected)');
   document.getElementById('mqtt-topic-preview').innerHTML =
     lines.map(l => `<span style="color:var(--accent4)">${l}</span>`).join('<br>');
