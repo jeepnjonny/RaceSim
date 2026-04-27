@@ -15,7 +15,7 @@ if [ ! -d "${INSTALL_DIR}/.git" ]; then
 fi
 
 echo "Pulling latest changes..."
-git -C "${INSTALL_DIR}" pull --ff-only
+git -C "${INSTALL_DIR}" -c safe.directory="${INSTALL_DIR}" pull --ff-only
 
 echo "Setting permissions..."
 chown -R root:"${SERVICE_USER}" "${INSTALL_DIR}"

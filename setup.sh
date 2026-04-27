@@ -27,7 +27,7 @@ echo "  nginx OK"
 # ── 2. Clone or pull ───────────────────────────────────────────────────────────
 if [ -d "${INSTALL_DIR}/.git" ]; then
   echo "Repo already present — pulling latest..."
-  sudo git -C "${INSTALL_DIR}" pull --ff-only
+  sudo git -C "${INSTALL_DIR}" -c safe.directory="${INSTALL_DIR}" pull --ff-only
 else
   echo "Cloning repo to ${INSTALL_DIR}..."
   sudo git clone "${REPO_URL}" "${INSTALL_DIR}"
