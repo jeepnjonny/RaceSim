@@ -269,6 +269,12 @@
         </select>
       </div>
       <div class="form-group">
+        <div class="checkbox-row">
+          <input type="checkbox" id="out-and-back" onchange="onOutAndBackChange(this)">
+          <label for="out-and-back">Out &amp; Back <span style="color:var(--text3);font-size:10px">participants return to start</span></label>
+        </div>
+      </div>
+      <div class="form-group">
         <label>PACE VARIANCE</label>
         <div class="slider-with-val">
           <input type="range" min="0" max="100" value="20" id="pace-var" step="1" oninput="document.getElementById('pace-var-val').textContent=this.value+'%'">
@@ -466,6 +472,7 @@
 let trackPoints = [];
 let trackDistances = [];
 let totalDist = 0;
+let outAndBack = false;
 let participants = [];
 let simRunning = false;
 let simInterval = null;
@@ -766,7 +773,7 @@ function setTrack(pts) {
     trackDistances.push(trackDistances[i-1] + haversine(pts[i-1], pts[i]));
   }
   totalDist = trackDistances[trackDistances.length - 1];
-  document.getElementById('stat-dist').textContent = (totalDist/1000).toFixed(2) + ' km';
+  updateDistStat();
   initMap();
 }
 
@@ -790,6 +797,12 @@ function posOnTrack(dist) {
     trackPoints[lo][0] + t*(trackPoints[hi][0]-trackPoints[lo][0]),
     trackPoints[lo][1] + t*(trackPoints[hi][1]-trackPoints[lo][1])
   ];
+}
+
+// Maps raw p.dist (0→totalDist or 0→2*totalDist in out-and-back) to track position distance
+function effectiveDist(rawDist) {
+  if (!outAndBack || rawDist <= totalDist) return rawDist;
+  return 2 * totalDist - rawDist;
 }
 
 // ===================== DEADZONES =====================
@@ -886,8 +899,13 @@ function initMap() {
   }
 
   trackLayer = L.polyline(trackPoints, {color:'#8b949e', weight:3, opacity:0.6}).addTo(leafletMap);
-  L.circleMarker(trackPoints[0], {radius:8,color:'#3fb950',fillColor:'#3fb950',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('START');
-  L.circleMarker(trackPoints[trackPoints.length-1], {radius:8,color:'#f78166',fillColor:'#f78166',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('FINISH');
+  if (outAndBack) {
+    L.circleMarker(trackPoints[0], {radius:8,color:'#3fb950',fillColor:'#3fb950',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('START / FINISH');
+    L.circleMarker(trackPoints[trackPoints.length-1], {radius:8,color:'#e8b339',fillColor:'#e8b339',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('TURNAROUND');
+  } else {
+    L.circleMarker(trackPoints[0], {radius:8,color:'#3fb950',fillColor:'#3fb950',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('START');
+    L.circleMarker(trackPoints[trackPoints.length-1], {radius:8,color:'#f78166',fillColor:'#f78166',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('FINISH');
+  }
   leafletMap.fitBounds(trackLayer.getBounds(), {padding:[20,20]});
 }
 
@@ -966,7 +984,8 @@ function renderParticipantList() {
     div.style.flexDirection = 'column';
     div.style.alignItems = 'stretch';
     div.style.gap = '2px';
-    const pct = totalDist > 0 ? (p.dist/totalDist*100).toFixed(0) : 0;
+    const raceTotalDist = outAndBack ? 2 * totalDist : totalDist;
+    const pct = raceTotalDist > 0 ? (p.dist / raceTotalDist * 100).toFixed(0) : 0;
     const statusHtml = p.finished
       ? '<span class="p-finished">FIN</span>'
       : p.dnf
@@ -1036,9 +1055,9 @@ function startRace() {
           addLog('info', `#${p.id} ${p.name} left ${p.currentStation}`);
         }
         p.lastTx += simDt;
-        if (p.lastTx >= txInterval && !isInDeadzone(p.dist)) {
+        if (p.lastTx >= txInterval && !isInDeadzone(effectiveDist(p.dist))) {
           p.lastTx = 0; p.txCount++;
-          sendMqttPacket(p, noisyPos(posOnTrack(p.dist), p));
+          sendMqttPacket(p, noisyPos(posOnTrack(effectiveDist(p.dist)), p));
         }
         p.lastNodeInfo += simDt;
         if (p.lastNodeInfo >= 900) { p.lastNodeInfo = 0; sendNodeInfo(p); }
@@ -1060,13 +1079,20 @@ function startRace() {
       p.noiseHeading += (Math.random() - 0.5) * 12;
 
       // Move
-      p.dist = Math.min(p.dist + p.currentSpeed * simDt, totalDist);
+      const raceTotalDist = outAndBack ? 2 * totalDist : totalDist;
+      p.dist = Math.min(p.dist + p.currentSpeed * simDt, raceTotalDist);
+      const onReturn = outAndBack && p.dist > totalDist;
 
       // Aid station arrival check
       for (const s of activeStations) {
-        if (!p.visitedStations.has(s.name) && p.dist >= s.trackDist) {
-          p.visitedStations.add(s.name);
-          p.dist = s.trackDist;
+        const stationKey = outAndBack ? s.name + (onReturn ? '~ret' : '~out') : s.name;
+        const distAlongLeg = onReturn ? 2 * totalDist - p.dist : p.dist;
+        const triggered = onReturn
+          ? (!p.visitedStations.has(stationKey) && distAlongLeg <= s.trackDist && p.dist > totalDist + (totalDist - s.trackDist))
+          : (!p.visitedStations.has(stationKey) && p.dist >= s.trackDist);
+        if (triggered) {
+          p.visitedStations.add(stationKey);
+          p.dist = onReturn ? 2 * totalDist - s.trackDist : s.trackDist;
           const stop = STATION_STOP[p.type];
           p.stopTimer = stop.min + Math.random() * (stop.max - stop.min);
           p.atStation = true;
@@ -1087,11 +1113,11 @@ function startRace() {
       // Random DNF only when no stations defined
       if (activeStations.length === 0 && dnfPct > 0 && Math.random() < (dnfPct / participants.length) * (simDt / 3600)) {
         p.dnf = true;
-        addLog('warn', `#${p.id} ${p.name} DNF at ${(p.dist/1000).toFixed(1)}km`);
+        addLog('warn', `#${p.id} ${p.name} DNF at ${(effectiveDist(p.dist)/1000).toFixed(1)}km`);
       }
 
       // Finish check
-      if (p.dist >= totalDist && !p.finished) {
+      if (p.dist >= raceTotalDist && !p.finished) {
         p.finished = true;
         p.finishTime = raceElapsed;
         addLog('finish', `#${p.id} ${p.name} FINISHED! ${formatTime(raceElapsed)}`);
@@ -1102,9 +1128,9 @@ function startRace() {
       p.lastTx += simDt;
       if (p.lastTx >= txInterval) {
         p.lastTx = 0;
-        if (!isInDeadzone(p.dist)) {
+        if (!isInDeadzone(effectiveDist(p.dist))) {
           p.txCount++;
-          sendMqttPacket(p, noisyPos(posOnTrack(p.dist), p));
+          sendMqttPacket(p, noisyPos(posOnTrack(effectiveDist(p.dist)), p));
         }
       }
 
@@ -1163,7 +1189,7 @@ function resetRace() {
 // ===================== MARKERS =====================
 function updateMarker(p) {
   if (!leafletMap) return;
-  const pos = noisyPos(posOnTrack(p.dist), p);
+  const pos = noisyPos(posOnTrack(effectiveDist(p.dist)), p);
   const color = p.dnf ? '#484f58' : '#4a9eff';
 
   if (!p.marker) {
@@ -1580,6 +1606,17 @@ function doConnect(host, port, useTls, user, pass, status) {
 }
 
 // ===================== STATS & CLOCK =====================
+function updateDistStat() {
+  const raceDist = totalDist * (outAndBack ? 2 : 1);
+  document.getElementById('stat-dist').textContent = (raceDist / 1000).toFixed(2) + ' km';
+}
+
+function onOutAndBackChange(cb) {
+  outAndBack = cb.checked;
+  updateDistStat();
+  if (trackPoints.length) initMap();
+}
+
 function updateStats() {
   const active = participants.filter(p=>!p.finished&&!p.dnf).length;
   const finished = participants.filter(p=>p.finished).length;
