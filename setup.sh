@@ -1,67 +1,87 @@
 #!/usr/bin/env bash
-# Initial server setup — clone the repo and configure nginx.
-# Run once as root (or with sudo) on your nginx host.
-#
-# Usage:
-#   sudo bash setup.sh
-#
-# Optional: set SERVER_NAME to your domain before running, e.g.:
-#   SERVER_NAME=example.com sudo bash setup.sh
+# MeshRace Simulator — first-time server setup
+# Run as a user with sudo access on your nginx host
+# Usage: bash setup.sh [--ssl]
+
 set -euo pipefail
 
 REPO_URL="https://github.com/jeepnjonny/meshtastic-race-simulator.git"
 INSTALL_DIR="/srv/meshtastic-race-simulator"
-SITE_NAME="meshrace"
-SITES_AVAILABLE="/etc/nginx/sites-available/$SITE_NAME"
-SITES_ENABLED="/etc/nginx/sites-enabled/$SITE_NAME"
-SERVER_NAME="${SERVER_NAME:-$(hostname -f)}"
+SERVICE_USER="www-data"
+HOSTNAME="${HOSTNAME:-$(hostname -f)}"
+SSL=${1:-""}
+
+echo "=== MeshRace Simulator Setup ==="
 
 # ── 1. Dependencies ────────────────────────────────────────────────────────────
-echo "==> Checking dependencies..."
+echo "Checking dependencies..."
 if ! command -v git &>/dev/null; then
-  apt-get update -qq && apt-get install -y git
+  sudo apt-get update -qq && sudo apt-get install -y git
 fi
 if ! command -v nginx &>/dev/null; then
-  apt-get update -qq && apt-get install -y nginx
+  sudo apt-get update -qq && sudo apt-get install -y nginx
 fi
+echo "  git $(git --version | awk '{print $3}') OK"
+echo "  nginx OK"
 
-# ── 2. Clone or update repo ───────────────────────────────────────────────────
-if [ -d "$INSTALL_DIR/.git" ]; then
-  echo "==> Repo already present — pulling latest..."
-  git -C "$INSTALL_DIR" pull --ff-only
+# ── 2. Clone or pull ───────────────────────────────────────────────────────────
+if [ -d "${INSTALL_DIR}/.git" ]; then
+  echo "Repo already present — pulling latest..."
+  sudo git -C "${INSTALL_DIR}" pull --ff-only
 else
-  echo "==> Cloning repo to $INSTALL_DIR..."
-  git clone "$REPO_URL" "$INSTALL_DIR"
+  echo "Cloning repo to ${INSTALL_DIR}..."
+  sudo git clone "${REPO_URL}" "${INSTALL_DIR}"
 fi
 
-# ── 3. Permissions ────────────────────────────────────────────────────────────
-# root owns the repo so git operations work under sudo.
-# www-data group gets read access to serve files; no write access needed.
-echo "==> Setting permissions..."
-chown -R root:www-data "$INSTALL_DIR"
-find "$INSTALL_DIR" -type d -exec chmod 750 {} +
-find "$INSTALL_DIR" -type f -exec chmod 640 {} +
+# ── 3. Permissions ─────────────────────────────────────────────────────────────
+echo "Setting permissions..."
+sudo chown -R root:"${SERVICE_USER}" "${INSTALL_DIR}"
+sudo find "${INSTALL_DIR}" -type d -exec chmod 750 {} +
+sudo find "${INSTALL_DIR}" -type f -exec chmod 640 {} +
 
-# ── 4. Remove legacy conf.d file if present ──────────────────────────────────
+# ── 4. Remove legacy conf.d file if present ────────────────────────────────────
 LEGACY_CONF="/etc/nginx/conf.d/meshrace.conf"
-if [ -f "$LEGACY_CONF" ]; then
-  echo "==> Removing legacy config: $LEGACY_CONF"
-  rm -f "$LEGACY_CONF"
+if [ -f "${LEGACY_CONF}" ]; then
+  echo "Removing legacy config: ${LEGACY_CONF}"
+  sudo rm -f "${LEGACY_CONF}"
 fi
 
-# ── 5. nginx site config ──────────────────────────────────────────────────────
-echo "==> Writing $SITES_AVAILABLE..."
-cat > "$SITES_AVAILABLE" << EOF
-# MeshRace Simulator
-# Serving at http://${SERVER_NAME}/MeshraceSim/
+# ── 5. nginx ───────────────────────────────────────────────────────────────────
+LOCATION_BLOCK="
+    location /MeshraceSim/ {
+        alias ${INSTALL_DIR}/;
+        index index.html;
+        try_files \\\$uri \\\$uri/ /MeshraceSim/index.html;
+        add_header Cache-Control \"public, max-age=3600\";
+    }"
+
+if [ ! -d /etc/nginx/sites-available ]; then
+  echo "  nginx sites-available not found — copy the location block into your nginx config manually."
+else
+  EXISTING_CONF=$(grep -rl "server_name.*${HOSTNAME}" /etc/nginx/sites-enabled/ 2>/dev/null | head -1 || true)
+
+  if [ -n "${EXISTING_CONF}" ]; then
+    if grep -q "location /MeshraceSim/" "${EXISTING_CONF}"; then
+      echo "  nginx: /MeshraceSim/ location already present in ${EXISTING_CONF}"
+    else
+      echo "  nginx: injecting /MeshraceSim/ location into ${EXISTING_CONF}"
+      sudo sed -i "$ s|^\s*}|${LOCATION_BLOCK}\n}|" "${EXISTING_CONF}"
+      sudo nginx -t && sudo systemctl reload nginx
+      echo "  nginx reloaded"
+    fi
+  else
+    echo "  nginx: no existing server block for ${HOSTNAME}, deploying standalone config"
+    sudo tee /etc/nginx/sites-available/meshrace > /dev/null <<EOF
+# MeshRace Simulator — static file server
+# Serving at http://${HOSTNAME}/MeshraceSim/
 #
 # If you already have a server block for this hostname, copy the
-# location block below into that file and remove this one.
+# location block into that file and remove this one.
 
 server {
     listen 80;
     listen [::]:80;
-    server_name ${SERVER_NAME};
+    server_name ${HOSTNAME};
 
     location /MeshraceSim/ {
         alias ${INSTALL_DIR}/;
@@ -71,24 +91,28 @@ server {
     }
 }
 EOF
-
-# Enable the site (idempotent)
-if [ ! -L "$SITES_ENABLED" ]; then
-  echo "==> Enabling site..."
-  ln -s "$SITES_AVAILABLE" "$SITES_ENABLED"
-else
-  echo "==> Site already enabled."
+    sudo ln -sf /etc/nginx/sites-available/meshrace /etc/nginx/sites-enabled/meshrace
+    sudo nginx -t && sudo systemctl reload nginx
+    echo "  nginx configured"
+  fi
 fi
 
-# ── 6. Test and reload ────────────────────────────────────────────────────────
-echo "==> Testing nginx config..."
-nginx -t
-
-echo "==> Reloading nginx..."
-systemctl reload nginx
+# ── 6. SSL via certbot ─────────────────────────────────────────────────────────
+if [ "${SSL}" = "--ssl" ]; then
+  echo "Setting up SSL with certbot..."
+  if ! command -v certbot &>/dev/null; then
+    sudo apt-get install -y certbot python3-certbot-nginx
+  fi
+  sudo certbot --nginx -d "${HOSTNAME}" --non-interactive --agree-tos -m "admin@${HOSTNAME}" || true
+  echo "  SSL configured (check output above for any errors)"
+else
+  echo ""
+  echo "  TIP: Re-run with --ssl to configure HTTPS via certbot:"
+  echo "       bash setup.sh --ssl"
+fi
 
 echo ""
-echo "Done! App is live at: http://${SERVER_NAME}/MeshraceSim/"
-echo ""
-echo "To apply future updates:"
-echo "  cd $INSTALL_DIR && sudo git pull && sudo bash update.sh"
+echo "=== Setup complete ==="
+echo "  App:    http://${HOSTNAME}/MeshraceSim/"
+echo "  Update: sudo bash ${INSTALL_DIR}/update.sh"
+echo "  Logs:   sudo journalctl -u nginx -f"
