@@ -23,6 +23,7 @@
     --hiker: #3fb950;
     --bicyclist: #f0c040;
     --dirtbike: #f78166;
+    --jetboat: #bf91f3;
     --font: 'Courier New', monospace;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -83,6 +84,7 @@
   .p-row-hiker .p-icon { background: var(--hiker); }
   .p-row-bicyclist .p-icon { background: var(--bicyclist); }
   .p-row-dirtbike .p-icon { background: var(--dirtbike); }
+  .p-row-jetboat .p-icon { background: var(--jetboat); }
 
   /* MAP */
   #map-container { flex: 1; position: relative; }
@@ -149,6 +151,7 @@
   .badge-hiker { background: rgba(63,185,80,0.15); color: var(--hiker); }
   .badge-bicyclist { background: rgba(240,192,64,0.15); color: var(--bicyclist); }
   .badge-dirtbike { background: rgba(247,129,102,0.15); color: var(--dirtbike); }
+  .badge-jetboat { background: rgba(191,145,243,0.15); color: var(--jetboat); }
 
   #no-track { display: flex; align-items: center; justify-content: center; height: 100%; background: var(--surface); color: var(--text3); flex-direction: column; gap: 12px; }
 
@@ -239,6 +242,13 @@
               <div class="type-option-sub">6–20 m/s</div>
             </div>
           </div>
+          <div class="type-option" data-type="jetboat" onclick="selectRaceType('jetboat')" style="grid-column:1/-1">
+            <div class="type-option-dot" style="background:var(--jetboat)"></div>
+            <div>
+              <div class="type-option-label">JET BOAT</div>
+              <div class="type-option-sub">20–100 m/s</div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="form-group">
@@ -309,8 +319,9 @@
 
     <!-- PARTICIPANTS TAB -->
     <div class="tab-content" id="tab-participants">
-      <div style="padding: 0 0 8px; display:flex; gap:6px; flex-wrap:wrap; flex-shrink:0;" id="participants-tab-legend">
+      <div style="padding: 0 0 8px; display:flex; gap:6px; flex-wrap:wrap; align-items:center; flex-shrink:0;" id="participants-tab-legend">
         <span class="type-badge badge-runner" id="legend-badge">&#9679; RUN</span>
+        <button onclick="exportParticipantsCSV()" style="margin-left:auto;font-size:10px;padding:3px 9px" title="Download bib/name/tracker_id as CSV">&#8595; CSV</button>
       </div>
       <div id="participant-list" style="flex:1;overflow-y:auto;"></div>
     </div>
@@ -515,24 +526,26 @@ const MODEM_PRESETS = {
   ShortTurbo:  { snrMin:   0.0, snrMax: 12.5, rssiMin:  -95, rssiMax: -85 },
 };
 
-const TYPE_LABELS = { runner:'Runner', hiker:'Hiker', bicyclist:'Bicyclist', dirtbike:'Dirt Bike' };
-const TYPE_BADGE_LABELS = { runner:'&#9679; RUN', hiker:'&#9679; HIKE', bicyclist:'&#9679; BIKE', dirtbike:'&#9679; MOTO' };
-const TYPE_BADGE_CLASS = { runner:'badge-runner', hiker:'badge-hiker', bicyclist:'badge-bicyclist', dirtbike:'badge-dirtbike' };
+const TYPE_LABELS = { runner:'Runner', hiker:'Hiker', bicyclist:'Bicyclist', dirtbike:'Dirt Bike', jetboat:'Jet Boat' };
+const TYPE_BADGE_LABELS = { runner:'&#9679; RUN', hiker:'&#9679; HIKE', bicyclist:'&#9679; BIKE', dirtbike:'&#9679; MOTO', jetboat:'&#9679; BOAT' };
+const TYPE_BADGE_CLASS = { runner:'badge-runner', hiker:'badge-hiker', bicyclist:'badge-bicyclist', dirtbike:'badge-dirtbike', jetboat:'badge-jetboat' };
 
 const PACE = {
-  runner:   { base: 3.5, min: 2.5, max: 5.5 },   // m/s ~5-12 min/mile
-  hiker:    { base: 1.2, min: 0.8, max: 1.8 },
-  bicyclist:{ base: 6.0, min: 3.0, max: 10.0 },
-  dirtbike: { base: 12.0, min: 6.0, max: 20.0 },
+  runner:   { base: 3.5,  min: 2.5,  max: 5.5   },  // m/s ~5-12 min/mile
+  hiker:    { base: 1.2,  min: 0.8,  max: 1.8   },
+  bicyclist:{ base: 6.0,  min: 3.0,  max: 10.0  },
+  dirtbike: { base: 12.0, min: 6.0,  max: 20.0  },
+  jetboat:  { base: 50.0, min: 20.0, max: 100.0 },
 };
 const STATION_STOP = {
-  runner:    { min: 60,   max: 900  },
-  hiker:     { min: 180,  max: 1200 },
-  bicyclist: { min: 30,   max: 300  },
-  dirtbike:  { min: 15,   max: 120  },
+  runner:    { min: 60,  max: 900  },
+  hiker:     { min: 180, max: 1200 },
+  bicyclist: { min: 30,  max: 300  },
+  dirtbike:  { min: 15,  max: 120  },
+  jetboat:   { min: 10,  max: 60   },
 };
-const COLORS = { runner:'#58a6ff', hiker:'#3fb950', bicyclist:'#f0c040', dirtbike:'#f78166' };
-const TYPE_ICONS = { runner:'&#9675;', hiker:'&#9651;', bicyclist:'&#9670;', dirtbike:'&#9733;' };
+const COLORS = { runner:'#58a6ff', hiker:'#3fb950', bicyclist:'#f0c040', dirtbike:'#f78166', jetboat:'#bf91f3' };
+const TYPE_ICONS = { runner:'&#9675;', hiker:'&#9651;', bicyclist:'&#9670;', dirtbike:'&#9733;', jetboat:'&#9670;' };
 
 const names = [
   'Alex','Jordan','Casey','Morgan','Taylor','Riley','Avery','Quinn','Sage','Blake',
@@ -973,6 +986,17 @@ function generateParticipants() {
 
   renderParticipantList();
   addLog('info', count + ' ' + TYPE_LABELS[type].toLowerCase() + 's generated');
+}
+
+function exportParticipantsCSV() {
+  if (!participants.length) { alert('No participants to export.'); return; }
+  const rows = [['bib', 'name', 'tracker_id']];
+  participants.forEach(p => rows.push([p.id, `"${p.name.replace(/"/g, '""')}"`, p.nodeId]));
+  const csv = rows.map(r => r.join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'participants.csv';
+  a.click();
 }
 
 function renderParticipantList() {
