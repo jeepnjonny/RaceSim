@@ -554,14 +554,7 @@ function loadKML(input) {
   const reader = new FileReader();
   reader.onload = e => {
     const txt = e.target.result;
-    if (f.name.toLowerCase().endsWith('.gpx')) {
-      const pts = parseGPX(txt);
-      if (!pts || pts.length < 2) { alert('No valid track found.'); return; }
-      allParsedPoints = [];
-      finishTrackLoad(pts);
-      return;
-    }
-    const result = parseKML(txt);
+    const result = f.name.toLowerCase().endsWith('.gpx') ? parseGPX(txt) : parseKML(txt);
     if (!result.paths.length) { alert('No valid track coordinates found in file.'); return; }
     allParsedPaths = result.paths;
     allParsedPoints = result.points;
@@ -608,8 +601,42 @@ function parseKML(txt) {
 function parseGPX(txt) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(txt, 'text/xml');
-  const trkpts = doc.querySelectorAll('trkpt,rtept,wpt');
-  return Array.from(trkpts).map(pt => [parseFloat(pt.getAttribute('lat')), parseFloat(pt.getAttribute('lon'))]);
+  const paths = [];
+
+  // Track segments — each <trk> becomes a named path
+  doc.querySelectorAll('trk').forEach(trk => {
+    const name = trk.querySelector('name')?.textContent.trim() || 'GPX Track';
+    const pts = Array.from(trk.querySelectorAll('trkpt')).map(pt => {
+      const lat = parseFloat(pt.getAttribute('lat'));
+      const lon = parseFloat(pt.getAttribute('lon'));
+      return isNaN(lat) || isNaN(lon) ? null : [lat, lon];
+    }).filter(Boolean);
+    if (pts.length >= 2) paths.push({ name, points: pts });
+  });
+
+  // Fallback: route points (<rte>/<rtept>) if no track segments found
+  if (!paths.length) {
+    doc.querySelectorAll('rte').forEach(rte => {
+      const name = rte.querySelector('name')?.textContent.trim() || 'GPX Route';
+      const pts = Array.from(rte.querySelectorAll('rtept')).map(pt => {
+        const lat = parseFloat(pt.getAttribute('lat'));
+        const lon = parseFloat(pt.getAttribute('lon'));
+        return isNaN(lat) || isNaN(lon) ? null : [lat, lon];
+      }).filter(Boolean);
+      if (pts.length >= 2) paths.push({ name, points: pts });
+    });
+  }
+
+  // Waypoints — returned as named points (aid stations etc.)
+  const points = Array.from(doc.querySelectorAll('wpt')).map((wpt, i) => {
+    const lat = parseFloat(wpt.getAttribute('lat'));
+    const lon = parseFloat(wpt.getAttribute('lon'));
+    if (isNaN(lat) || isNaN(lon)) return null;
+    const name = wpt.querySelector('name')?.textContent.trim() || `WP${i + 1}`;
+    return { name, lat, lon };
+  }).filter(Boolean);
+
+  return { paths, points };
 }
 
 function finishTrackLoad(pts) {
