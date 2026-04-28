@@ -486,8 +486,7 @@ let totalDist = 0;
 let outAndBack = false;
 let participants = [];
 let simRunning = false;
-let simInterval = null;
-let clockInterval = null;
+let simWorker = null;   // Web Worker drives the sim tick so it runs in background tabs
 let raceElapsed = 0;
 let simSpeed = 10;
 let mqttClient = null;
@@ -1048,22 +1047,28 @@ function startRace() {
   document.getElementById('race-speed').style.display = '';
 
   raceElapsed = 0;
-  clockInterval = setInterval(updateClock, 1000);
 
   const txInterval = parseInt(document.getElementById('tx-interval').value);
   const dnfPct = parseInt(document.getElementById('dnf-pct').value) / 100;
-  const SIM_TICK = 100; // ms real time
   let lastTick = performance.now();
+  let lastClockSec = -1;
 
   addLog('info', 'Race started! ' + participants.length + ' participants.');
   generateDeadzones();
   participants.forEach(p => sendNodeInfo(p));
 
-  simInterval = setInterval(() => {
+  function _simTick() {
     const now = performance.now();
-    const realDt = Math.min((now - lastTick) / 1000, 1.0); // cap at 1s to avoid huge jumps on wake
+    const realDt = Math.min((now - lastTick) / 1000, 1.0); // cap at 1s to avoid huge jump on wake
     lastTick = now;
     const simDt = realDt * simSpeed;
+
+    // Update clock display whenever the simulated second ticks over
+    const clockSec = Math.floor(raceElapsed);
+    if (clockSec !== lastClockSec) {
+      lastClockSec = clockSec;
+      document.getElementById('race-clock').textContent = formatTime(raceElapsed);
+    }
     raceElapsed += simDt;
     const allDone = participants.every(p=>p.finished||p.dnf);
     if (allDone) { stopRace(); return; }
@@ -1167,13 +1172,20 @@ function startRace() {
 
     updateStats();
     if (raceElapsed % 5 < simDt) renderParticipantList();
-  }, SIM_TICK);
+  }
+
+  // Use an inline Web Worker so the tick fires at full rate even when the tab
+  // is hidden — browsers throttle setInterval on background tabs to ~1 Hz.
+  const workerSrc = 'setInterval(()=>postMessage("tick"),100);';
+  const workerUrl = URL.createObjectURL(new Blob([workerSrc], { type: 'application/javascript' }));
+  simWorker = new Worker(workerUrl);
+  URL.revokeObjectURL(workerUrl);
+  simWorker.onmessage = _simTick;
 }
 
 function stopRace() {
   simRunning = false;
-  clearInterval(simInterval);
-  clearInterval(clockInterval);
+  if (simWorker) { simWorker.terminate(); simWorker = null; }
   document.getElementById('btn-start').disabled = false;
   document.getElementById('btn-stop').disabled = true;
   document.getElementById('sim-status').textContent = 'STOPPED';
@@ -1653,10 +1665,6 @@ function updateStats() {
   if (droppedEl) droppedEl.textContent = droppedCount;
 }
 
-function updateClock() {
-  raceElapsed += 1;
-  document.getElementById('race-clock').textContent = formatTime(raceElapsed);
-}
 
 function formatTime(s) {
   const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60);
