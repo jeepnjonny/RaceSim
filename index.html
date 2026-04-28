@@ -287,10 +287,24 @@
         </div>
       </div>
       <div class="form-group">
+        <label>PRE-START DELAY <span style="color:var(--text3);font-size:10px">linger at start before race</span></label>
+        <div class="slider-with-val">
+          <input type="range" min="30" max="300" value="60" id="prestart-delay" step="10" oninput="document.getElementById('prestart-delay-val').textContent=formatPrestart(+this.value)">
+          <span class="slider-val" id="prestart-delay-val">1 min</span>
+        </div>
+      </div>
+      <div class="form-group">
         <label>PACE VARIANCE</label>
         <div class="slider-with-val">
           <input type="range" min="0" max="100" value="20" id="pace-var" step="1" oninput="document.getElementById('pace-var-val').textContent=this.value+'%'">
           <span class="slider-val" id="pace-var-val">20%</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>COURSE VARIANCE <span style="color:var(--text3);font-size:10px">max lateral drift from track</span></label>
+        <div class="slider-with-val">
+          <input type="range" min="0" max="100" value="10" id="course-variance" step="1" oninput="document.getElementById('course-variance-val').textContent=this.value+'m'">
+          <span class="slider-val" id="course-variance-val">10m</span>
         </div>
       </div>
       <div class="form-group">
@@ -986,7 +1000,7 @@ function generateParticipants() {
       speedInterval: 30 + Math.random()*60,
       marker: null,
       noiseHeading: Math.random() * 360,
-      noiseAmp: 5 + Math.random() * 15,
+      noiseAmp: parseFloat(document.getElementById('course-variance').value) * Math.random(),
       visitedStations: new Set(),
       atStation: false,
       stopTimer: 0,
@@ -1059,12 +1073,20 @@ function startRace() {
 
   raceElapsed = 0;
 
-  const txInterval = parseInt(document.getElementById('tx-interval').value);
-  const dnfPct = parseInt(document.getElementById('dnf-pct').value) / 100;
-  let lastTick = performance.now();
+  const txInterval    = parseInt(document.getElementById('tx-interval').value);
+  const dnfPct        = parseInt(document.getElementById('dnf-pct').value) / 100;
+  const preStartDelay = parseInt(document.getElementById('prestart-delay').value);
+  let lastTick    = performance.now();
   let lastClockSec = -1;
 
-  addLog('info', 'Race started! ' + participants.length + ' participants.');
+  // Initialise pre-start state on each participant
+  participants.forEach(p => {
+    p.preStartTimer   = preStartDelay;
+    p.preStartBeacons = 0;
+    p.lastTx          = 0;
+  });
+
+  addLog('info', 'Race started! ' + participants.length + ' participants. Pre-start: ' + formatPrestart(preStartDelay));
   generateDeadzones();
   participants.forEach(p => sendNodeInfo(p));
 
@@ -1086,6 +1108,27 @@ function startRace() {
 
     participants.forEach(p => {
       if (p.finished || p.dnf) return;
+
+      // Pre-start linger — stay at dist=0, beacon twice evenly across the delay
+      if (p.preStartTimer > 0) {
+        p.preStartTimer -= simDt;
+        // Beacon 1: halfway through the delay
+        if (p.preStartBeacons === 0 && p.preStartTimer <= preStartDelay / 2) {
+          p.preStartBeacons = 1;
+          p.txCount++;
+          sendMqttPacket(p, noisyPos(posOnTrack(0), p));
+        }
+        // Beacon 2 + race start: when timer expires
+        if (p.preStartTimer <= 0) {
+          p.preStartTimer = 0;
+          p.preStartBeacons = 2;
+          p.txCount++;
+          sendMqttPacket(p, noisyPos(posOnTrack(0), p));
+          p.lastTx = 0;
+        }
+        updateMarker(p);
+        return;
+      }
 
       // Handle station stop — device stays put but keeps beaconing
       if (p.atStation) {
@@ -1209,6 +1252,7 @@ function resetRace() {
   participants.forEach(p => {
     p.dist = 0; p.finished = false; p.dnf = false;
     p.finishTime = null; p.lastTx = 0; p.txCount = 0; p.lastNodeInfo = Math.random() * 900;
+    p.preStartTimer = 0; p.preStartBeacons = 0;
     p.currentSpeed = p.baseSpeed;
     p.visitedStations = new Set();
     p.atStation = false; p.stopTimer = 0; p.currentStation = '';
@@ -1676,6 +1720,11 @@ function updateStats() {
   if (droppedEl) droppedEl.textContent = droppedCount;
 }
 
+
+function formatPrestart(s) {
+  if (s < 60) return s + 's';
+  return (s / 60) % 1 === 0 ? (s / 60) + ' min' : (s / 60).toFixed(1) + ' min';
+}
 
 function formatTime(s) {
   const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60);
