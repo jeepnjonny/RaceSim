@@ -315,6 +315,13 @@
         </div>
       </div>
       <div class="form-group">
+        <label>AID STATION STOP <span style="color:var(--text3);font-size:10px">0 = pass-through</span></label>
+        <div class="slider-with-val">
+          <input type="range" min="0" max="90" value="0" id="station-stop" step="1" oninput="document.getElementById('station-stop-val').textContent=this.value===&quot;0&quot;?&quot;off&quot;:this.value+&quot; min&quot;">
+          <span class="slider-val" id="station-stop-val">off</span>
+        </div>
+      </div>
+      <div class="form-group">
         <label>FAILED BEACONS</label>
         <div class="slider-with-val">
           <input type="range" min="0" max="50" value="0" id="beacon-drop" step="1" oninput="document.getElementById('beacon-drop-val').textContent=this.value+'%'">
@@ -755,11 +762,12 @@ function snapToTrack(lat, lon) {
   return trackDistances[bestIdx];
 }
 
-function noisyPos(pos, p) {
+function noisyPos(pos, p, maxAmp) {
+  const amp = maxAmp !== undefined ? Math.min(p.noiseAmp, maxAmp) : p.noiseAmp;
   const R = 6371000;
   const headRad = p.noiseHeading * Math.PI / 180;
-  const dlat = (Math.cos(headRad) * p.noiseAmp / R) * (180 / Math.PI);
-  const dlon = (Math.sin(headRad) * p.noiseAmp / R) * (180 / Math.PI) / Math.cos(pos[0] * Math.PI / 180);
+  const dlat = (Math.cos(headRad) * amp / R) * (180 / Math.PI);
+  const dlon = (Math.sin(headRad) * amp / R) * (180 / Math.PI) / Math.cos(pos[0] * Math.PI / 180);
   return [pos[0] + dlat, pos[1] + dlon];
 }
 
@@ -1001,6 +1009,8 @@ function generateParticipants() {
       marker: null,
       noiseHeading: Math.random() * 360,
       noiseAmp: parseFloat(document.getElementById('course-variance').value) * Math.random(),
+      battery: 90 + Math.random() * 10,          // start 90–100 %
+      batteryDrainRate: 1 + Math.random() * 2,   // %/hr simulated
       visitedStations: new Set(),
       atStation: false,
       stopTimer: 0,
@@ -1073,9 +1083,10 @@ function startRace() {
 
   raceElapsed = 0;
 
-  const txInterval    = parseInt(document.getElementById('tx-interval').value);
-  const dnfPct        = parseInt(document.getElementById('dnf-pct').value) / 100;
-  const preStartDelay = parseInt(document.getElementById('prestart-delay').value);
+  const txInterval     = parseInt(document.getElementById('tx-interval').value);
+  const dnfPct         = parseInt(document.getElementById('dnf-pct').value) / 100;
+  const preStartDelay  = parseInt(document.getElementById('prestart-delay').value);
+  const stationStopMin = parseInt(document.getElementById('station-stop').value);
   let lastTick    = performance.now();
   let lastClockSec = -1;
 
@@ -1109,6 +1120,9 @@ function startRace() {
     participants.forEach(p => {
       if (p.finished || p.dnf) return;
 
+      // Battery drain — %/hr simulated
+      p.battery = Math.max(0, p.battery - p.batteryDrainRate / 3600 * simDt);
+
       // Pre-start linger — stay at dist=0, beacon twice evenly across the delay
       if (p.preStartTimer > 0) {
         p.preStartTimer -= simDt;
@@ -1140,7 +1154,8 @@ function startRace() {
         p.lastTx += simDt;
         if (p.lastTx >= txInterval && !isInDeadzone(effectiveDist(p.dist))) {
           p.lastTx = 0; p.txCount++;
-          sendMqttPacket(p, noisyPos(posOnTrack(effectiveDist(p.dist)), p));
+          const stPos = posOnTrack(effectiveDist(p.dist));
+          sendMqttPacket(p, noisyPos(stPos, p, 10)); // cap at 10m while stopped at station
         }
         p.lastNodeInfo += simDt;
         if (p.lastNodeInfo >= 900) { p.lastNodeInfo = 0; sendNodeInfo(p); }
@@ -1176,9 +1191,8 @@ function startRace() {
         if (triggered) {
           p.visitedStations.add(stationKey);
           p.dist = onReturn ? 2 * totalDist - s.trackDist : s.trackDist;
-          const stop = STATION_STOP[p.type];
-          p.stopTimer = stop.min + Math.random() * (stop.max - stop.min);
-          p.atStation = true;
+          p.stopTimer = stationStopMin * 60;
+          p.atStation = stationStopMin > 0;
           p.currentStation = s.name;
           addLog('info', `#${p.id} ${p.name} at ${s.name} (~${Math.round(p.stopTimer/60)}min)`);
           // DNF at station
@@ -1253,6 +1267,8 @@ function resetRace() {
     p.dist = 0; p.finished = false; p.dnf = false;
     p.finishTime = null; p.lastTx = 0; p.txCount = 0; p.lastNodeInfo = Math.random() * 900;
     p.preStartTimer = 0; p.preStartBeacons = 0;
+    p.battery = 90 + Math.random() * 10;
+    p.batteryDrainRate = 1 + Math.random() * 2;
     p.currentSpeed = p.baseSpeed;
     p.visitedStations = new Set();
     p.atStation = false; p.stopTimer = 0; p.currentStation = '';
@@ -1473,11 +1489,13 @@ async function sendNodeInfo(p) {
   const fromNode  = parseInt(p.nodeId.substring(1), 16);
   const packetId  = Math.floor(Math.random() * 0xFFFFFFFF);
   const ts        = Math.floor(Date.now() / 1000);
-  const shortName = p.name.substring(0, 4).toUpperCase();
+  const bibStr    = p.id.toString().padStart(3, '0');
+  const longName  = 'RaceTracker' + bibStr;
+  const shortName = 'RT' + bibStr;
 
   const jsonPayload = {
     channel: 0, from: fromNode, hop_start: 5, hops_away: 0, id: packetId,
-    payload: { hardware: 0, id: p.nodeId, longname: p.name, role: 1, shortname: shortName },
+    payload: { hardware: 0, id: p.nodeId, longname: longName, role: 1, shortname: shortName },
     rssi, sender: p.nodeId, snr, timestamp: ts, to: 4294967295, type: 'nodeinfo',
   };
 
@@ -1492,7 +1510,7 @@ async function sendNodeInfo(p) {
   if (wantEnc) {
     const topic = `msh/${region}/2/e/${channelName}/${p.nodeId}`;
     try {
-      const userBytes = _pbUser(p.nodeId, p.name, shortName, 0, 1);
+      const userBytes = _pbUser(p.nodeId, longName, shortName, 0, 1);
       const envelope  = _buildServiceEnvelope(4, userBytes, fromNode, 0xFFFFFFFF, packetId, channelName, psk);
       if (mqttConnected && mqttClient && !mqttSimMode) {
         mqttClient.publish(topic, envelope);
@@ -1524,7 +1542,7 @@ async function sendMqttPacket(p, pos) {
 
   const jsonPayload = {
     channel: 0, from: fromNode, hop_start: 5, hops_away: 0, id: packetId,
-    payload: { altitude: 0, latitude_i: latI, longitude_i: lonI, precision_bits: 27, time: ts },
+    payload: { altitude: 0, latitude_i: latI, longitude_i: lonI, precision_bits: 27, time: ts, battery_level: Math.round(p.battery) },
     sender: p.nodeId, timestamp: ts, to: 4294967295, type: 'position',
   };
 
