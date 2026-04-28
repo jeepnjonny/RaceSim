@@ -1074,6 +1074,9 @@ function startRace() {
   if (!participants.length) generateParticipants();
   if (simRunning) return;
 
+  // Auto-connect MQTT if not already connected
+  if (!mqttConnected) connectMQTT();
+
   simRunning = true;
   document.getElementById('btn-start').disabled = true;
   document.getElementById('btn-stop').disabled = false;
