@@ -499,6 +499,7 @@ let droppedCount = 0;
 let leafletMap = null;
 let markerLayer = null;
 let trackLayer = null;
+let endpointLayer = null;  // start / finish / turnaround markers
 let selectedRaceType = 'runner';
 let deadzones = [];
 let deadzoneLayerGroup = [];
@@ -893,6 +894,19 @@ function isInDeadzone(dist) {
 }
 
 // ===================== MAP =====================
+function updateEndpointMarkers() {
+  if (!leafletMap || !trackPoints.length) return;
+  if (endpointLayer) endpointLayer.clearLayers();
+  else { endpointLayer = L.layerGroup().addTo(leafletMap); }
+  if (outAndBack) {
+    L.circleMarker(trackPoints[0], {radius:8,color:'#3fb950',fillColor:'#3fb950',fillOpacity:1,weight:2}).addTo(endpointLayer).bindPopup('START / FINISH');
+    L.circleMarker(trackPoints[trackPoints.length-1], {radius:8,color:'#e8b339',fillColor:'#e8b339',fillOpacity:1,weight:2}).addTo(endpointLayer).bindPopup('TURNAROUND');
+  } else {
+    L.circleMarker(trackPoints[0], {radius:8,color:'#3fb950',fillColor:'#3fb950',fillOpacity:1,weight:2}).addTo(endpointLayer).bindPopup('START');
+    L.circleMarker(trackPoints[trackPoints.length-1], {radius:8,color:'#f78166',fillColor:'#f78166',fillOpacity:1,weight:2}).addTo(endpointLayer).bindPopup('FINISH');
+  }
+}
+
 function initMap() {
   document.getElementById('no-track').style.display = 'none';
   document.getElementById('map').style.display = 'block';
@@ -905,6 +919,7 @@ function initMap() {
     stationMarkerLayer = L.layerGroup().addTo(leafletMap);
   } else {
     if (trackLayer) leafletMap.removeLayer(trackLayer);
+    if (endpointLayer) { endpointLayer.clearLayers(); }
     markerLayer.clearLayers();
     clearStationMarkers();
     activeStations = [];
@@ -913,13 +928,7 @@ function initMap() {
   }
 
   trackLayer = L.polyline(trackPoints, {color:'#8b949e', weight:3, opacity:0.6}).addTo(leafletMap);
-  if (outAndBack) {
-    L.circleMarker(trackPoints[0], {radius:8,color:'#3fb950',fillColor:'#3fb950',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('START / FINISH');
-    L.circleMarker(trackPoints[trackPoints.length-1], {radius:8,color:'#e8b339',fillColor:'#e8b339',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('TURNAROUND');
-  } else {
-    L.circleMarker(trackPoints[0], {radius:8,color:'#3fb950',fillColor:'#3fb950',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('START');
-    L.circleMarker(trackPoints[trackPoints.length-1], {radius:8,color:'#f78166',fillColor:'#f78166',fillOpacity:1,weight:2}).addTo(leafletMap).bindPopup('FINISH');
-  }
+  updateEndpointMarkers();
   leafletMap.fitBounds(trackLayer.getBounds(), {padding:[20,20]});
 }
 
@@ -1652,7 +1661,7 @@ function updateDistStat() {
 function onOutAndBackChange(cb) {
   outAndBack = cb.checked;
   updateDistStat();
-  if (trackPoints.length) initMap();
+  updateEndpointMarkers();
 }
 
 function updateStats() {
