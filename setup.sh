@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# MeshRace Simulator — first-time server setup
+# RaceSim — first-time server setup
 # Run as a user with sudo access on your nginx host
 # Usage: bash setup.sh [--ssl]
 
 set -euo pipefail
 
 REPO_URL="https://github.com/jeepnjonny/meshtastic-race-simulator.git"
-INSTALL_DIR="/srv/meshtastic-race-simulator"
+INSTALL_DIR="/srv/RaceSim"
 SERVICE_USER="www-data"
 HOSTNAME="${HOSTNAME:-$(hostname -f)}"
 SSL=${1:-""}
 
-echo "=== MeshRace Simulator Setup ==="
+echo "=== RaceSim Setup ==="
 
 # ── 1. Dependencies ────────────────────────────────────────────────────────────
 echo "Checking dependencies..."
@@ -40,7 +40,7 @@ sudo find "${INSTALL_DIR}" -type d -exec chmod 750 {} +
 sudo find "${INSTALL_DIR}" -type f -exec chmod 640 {} +
 
 # ── 4. Remove legacy conf.d file if present ────────────────────────────────────
-LEGACY_CONF="/etc/nginx/conf.d/meshrace.conf"
+LEGACY_CONF="/etc/nginx/conf.d/racesim.conf"
 if [ -f "${LEGACY_CONF}" ]; then
   echo "Removing legacy config: ${LEGACY_CONF}"
   sudo rm -f "${LEGACY_CONF}"
@@ -48,10 +48,10 @@ fi
 
 # ── 5. nginx ───────────────────────────────────────────────────────────────────
 LOCATION_BLOCK="
-    location /MeshraceSim/ {
+    location /RaceSim/ {
         alias ${INSTALL_DIR}/;
         index index.html;
-        try_files \\\$uri \\\$uri/ /MeshraceSim/index.html;
+        try_files \\\$uri \\\$uri/ /RaceSim/index.html;
         add_header Cache-Control \"public, max-age=3600\";
     }"
 
@@ -61,19 +61,19 @@ else
   EXISTING_CONF=$(grep -rl "server_name.*${HOSTNAME}" /etc/nginx/sites-enabled/ 2>/dev/null | head -1 || true)
 
   if [ -n "${EXISTING_CONF}" ]; then
-    if grep -q "location /MeshraceSim/" "${EXISTING_CONF}"; then
-      echo "  nginx: /MeshraceSim/ location already present in ${EXISTING_CONF}"
+    if grep -q "location /RaceSim/" "${EXISTING_CONF}"; then
+      echo "  nginx: /RaceSim/ location already present in ${EXISTING_CONF}"
     else
-      echo "  nginx: injecting /MeshraceSim/ location into ${EXISTING_CONF}"
+      echo "  nginx: injecting /RaceSim/ location into ${EXISTING_CONF}"
       sudo sed -i "$ s|^\s*}|${LOCATION_BLOCK}\n}|" "${EXISTING_CONF}"
       sudo nginx -t && sudo systemctl reload nginx
       echo "  nginx reloaded"
     fi
   else
     echo "  nginx: no existing server block for ${HOSTNAME}, deploying standalone config"
-    sudo tee /etc/nginx/sites-available/meshrace > /dev/null <<EOF
-# MeshRace Simulator — static file server
-# Serving at http://${HOSTNAME}/MeshraceSim/
+    sudo tee /etc/nginx/sites-available/racesim > /dev/null <<EOF
+# RaceSim — static file server
+# Serving at http://${HOSTNAME}/RaceSim/
 #
 # If you already have a server block for this hostname, copy the
 # location block into that file and remove this one.
@@ -83,15 +83,15 @@ server {
     listen [::]:80;
     server_name ${HOSTNAME};
 
-    location /MeshraceSim/ {
+    location /RaceSim/ {
         alias ${INSTALL_DIR}/;
         index index.html;
-        try_files \$uri \$uri/ /MeshraceSim/index.html;
+        try_files \$uri \$uri/ /RaceSim/index.html;
         add_header Cache-Control "public, max-age=3600";
     }
 }
 EOF
-    sudo ln -sf /etc/nginx/sites-available/meshrace /etc/nginx/sites-enabled/meshrace
+    sudo ln -sf /etc/nginx/sites-available/racesim /etc/nginx/sites-enabled/racesim
     sudo nginx -t && sudo systemctl reload nginx
     echo "  nginx configured"
   fi
@@ -113,6 +113,6 @@ fi
 
 echo ""
 echo "=== Setup complete ==="
-echo "  App:    http://${HOSTNAME}/MeshraceSim/"
+echo "  App:    http://${HOSTNAME}/RaceSim/"
 echo "  Update: sudo bash ${INSTALL_DIR}/update.sh"
 echo "  Logs:   sudo journalctl -u nginx -f"

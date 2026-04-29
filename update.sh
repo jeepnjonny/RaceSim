@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# MeshRace Simulator — apply updates from the repo
-# Usage: sudo bash /srv/meshtastic-race-simulator/update.sh
+# RaceSim — apply updates from the repo
+# Usage: sudo bash /srv/RaceSim/update.sh
 
 set -euo pipefail
 
-INSTALL_DIR="/srv/meshtastic-race-simulator"
+INSTALL_DIR="/srv/RaceSim"
 SERVICE_USER="www-data"
 
-echo "=== MeshRace Simulator Update ==="
+echo "=== RaceSim Update ==="
 
 if [ ! -d "${INSTALL_DIR}/.git" ]; then
   echo "Error: ${INSTALL_DIR} is not a git repo. Run setup.sh first."
@@ -24,5 +24,5 @@ find "${INSTALL_DIR}" -type f -exec chmod 640 {} +
 
 echo ""
 echo "=== Update complete ==="
-echo "  Changes are live at /MeshraceSim/"
+echo "  Changes are live at /RaceSim/"
 echo "  Logs: sudo journalctl -u nginx -f"
