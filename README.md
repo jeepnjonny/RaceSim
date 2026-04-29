@@ -27,7 +27,7 @@ A browser-based simulator that generates realistic GPS position beacons for race
 ## Install
 
 ```bash
-git clone https://github.com/jeepnjonny/meshtastic-race-simulator.git RaceSim
+git clone https://github.com/jeepnjonny/RaceSim.git
 cd RaceSim
 sudo bash setup.sh
 ```

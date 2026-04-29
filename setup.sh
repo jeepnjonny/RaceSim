@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-REPO_URL="https://github.com/jeepnjonny/meshtastic-race-simulator.git"
+REPO_URL="https://github.com/jeepnjonny/RaceSim.git"
 INSTALL_DIR="/srv/RaceSim"
 SERVICE_USER="www-data"
 HOSTNAME="${HOSTNAME:-$(hostname -f)}"
