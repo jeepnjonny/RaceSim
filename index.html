@@ -1121,7 +1121,21 @@ function startRace() {
     if (allDone) { stopRace(); return; }
 
     participants.forEach(p => {
-      if (p.finished || p.dnf) return;
+      if (p.dnf) return; // DNF trackers go silent
+
+      // Finished participants keep beaconing from their finish position
+      if (p.finished) {
+        p.battery = Math.max(0, p.battery - p.batteryDrainRate / 3600 * simDt);
+        p.lastTx += simDt;
+        if (p.lastTx >= txInterval && !isInDeadzone(effectiveDist(p.dist))) {
+          p.lastTx = 0; p.txCount++;
+          sendMqttPacket(p, noisyPos(posOnTrack(effectiveDist(p.dist)), p));
+        }
+        p.lastNodeInfo += simDt;
+        if (p.lastNodeInfo >= 900) { p.lastNodeInfo = 0; sendNodeInfo(p); }
+        updateMarker(p);
+        return;
+      }
 
       // Battery drain — %/hr simulated
       p.battery = Math.max(0, p.battery - p.batteryDrainRate / 3600 * simDt);
