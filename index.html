@@ -1522,8 +1522,8 @@ async function sendNodeInfo(p) {
   const packetId  = Math.floor(Math.random() * 0xFFFFFFFF);
   const ts        = Math.floor(Date.now() / 1000);
   const bibStr    = p.id.toString().padStart(3, '0');
-  const longName  = 'RaceTracker' + bibStr;
-  const shortName = 'RT' + bibStr;
+  const longName  = ('RaceTracker' + bibStr).slice(0, 39);  // Meshtastic max 39 chars
+  const shortName = ('R' + bibStr).slice(0, 4);             // Meshtastic max 4 chars → R001…R200
 
   const jsonPayload = {
     channel: 0, from: fromNode, hop_start: 5, hops_away: 0, id: packetId,
