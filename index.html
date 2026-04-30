@@ -1155,22 +1155,20 @@ function startRace() {
       // Battery drain — %/hr simulated
       p.battery = Math.max(0, p.battery - p.batteryDrainRate / 3600 * simDt);
 
-      // Pre-start linger — stay at dist=0, beacon twice evenly across the delay
+      // Pre-start linger — wander around the staging area at normal tx rate
       if (p.preStartTimer > 0) {
         p.preStartTimer -= simDt;
-        // Beacon 1: halfway through the delay
-        if (p.preStartBeacons === 0 && p.preStartTimer <= preStartDelay / 2) {
-          p.preStartBeacons = 1;
-          p.txCount++;
+        p.noiseHeading += (Math.random() - 0.5) * 12; // drift position like on-course
+        p.lastTx += simDt;
+        if (p.lastTx >= txInterval) {
+          p.lastTx = 0; p.txCount++;
           sendMqttPacket(p, noisyPos(posOnTrack(0), p));
         }
-        // Beacon 2 + race start: when timer expires
+        p.lastNodeInfo += simDt;
+        if (p.lastNodeInfo >= 900) { p.lastNodeInfo = 0; sendNodeInfo(p); }
         if (p.preStartTimer <= 0) {
           p.preStartTimer = 0;
-          p.preStartBeacons = 2;
-          p.txCount++;
-          sendMqttPacket(p, noisyPos(posOnTrack(0), p));
-          p.lastTx = 0;
+          p.lastTx = 0; // reset so first on-course beacon fires promptly
         }
         updateMarker(p);
         return;
