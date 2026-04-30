@@ -287,6 +287,19 @@
         </div>
       </div>
       <div class="form-group">
+        <div class="checkbox-row">
+          <input type="checkbox" id="staggered-start" onchange="document.getElementById('stagger-interval-group').style.display=this.checked?'':'none'">
+          <label for="staggered-start">Staggered Start <span style="color:var(--text3);font-size:10px">one participant leaves at a time</span></label>
+        </div>
+      </div>
+      <div class="form-group" id="stagger-interval-group" style="display:none">
+        <label>STAGGER INTERVAL <span style="color:var(--text3);font-size:10px">gap between each start</span></label>
+        <div class="slider-with-val">
+          <input type="range" min="10" max="300" value="60" id="stagger-interval" step="10" oninput="document.getElementById('stagger-interval-val').textContent=formatPrestart(+this.value)">
+          <span class="slider-val" id="stagger-interval-val">1 min</span>
+        </div>
+      </div>
+      <div class="form-group">
         <label>PRE-START DELAY <span style="color:var(--text3);font-size:10px">linger at start before race</span></label>
         <div class="slider-with-val">
           <input type="range" min="30" max="300" value="60" id="prestart-delay" step="10" oninput="document.getElementById('prestart-delay-val').textContent=formatPrestart(+this.value)">
@@ -1086,16 +1099,18 @@ function startRace() {
 
   raceElapsed = 0;
 
-  const txInterval     = parseInt(document.getElementById('tx-interval').value);
-  const dnfPct         = parseInt(document.getElementById('dnf-pct').value) / 100;
-  const preStartDelay  = parseInt(document.getElementById('prestart-delay').value);
-  const stationStopMin = parseInt(document.getElementById('station-stop').value);
-  let lastTick    = performance.now();
+  const txInterval      = parseInt(document.getElementById('tx-interval').value);
+  const dnfPct          = parseInt(document.getElementById('dnf-pct').value) / 100;
+  const preStartDelay   = parseInt(document.getElementById('prestart-delay').value);
+  const stationStopMin  = parseInt(document.getElementById('station-stop').value);
+  const staggered       = document.getElementById('staggered-start').checked;
+  const staggerInterval = parseInt(document.getElementById('stagger-interval').value);
+  let lastTick     = performance.now();
   let lastClockSec = -1;
 
-  // Initialise pre-start state on each participant
+  // Initialise pre-start state — staggered start adds (bib-1)*interval to each timer
   participants.forEach(p => {
-    p.preStartTimer   = preStartDelay;
+    p.preStartTimer   = preStartDelay + (staggered ? (p.id - 1) * staggerInterval : 0);
     p.preStartBeacons = 0;
     p.lastTx          = 0;
   });
